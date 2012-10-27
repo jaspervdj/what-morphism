@@ -1,0 +1,24 @@
+Name:          what-morphism
+Version:       0.0.0.1
+Synopsis:      Detect recursion patterns
+License:       BSD3
+License-file:  LICENSE
+Author:        Jasper Van der Jeugt <m@jaspervdj.be>
+Maintainer:    Jasper Van der Jeugt <m@jaspervdj.be>
+Category:      Language
+Build-type:    Simple
+Cabal-version: >= 1.8
+
+Library
+  Ghc-options:    -Wall
+  Hs-source-dirs: src
+
+  Exposed-modules:
+    WhatMorphism
+
+  Other-modules:
+    WhatMorphism.Pass
+
+  Build-depends:
+    base >= 4   && < 5,
+    ghc  >= 7.6 && < 7.7
