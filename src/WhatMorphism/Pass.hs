@@ -7,10 +7,18 @@ module WhatMorphism.Pass
 
 
 --------------------------------------------------------------------------------
-import           Control.Monad (liftM2)
+import           Control.Monad              (liftM2)
 import           CoreMonad
 import           CoreSyn
+import           Data.Monoid                (mappend, mconcat, mempty)
+import qualified Data.Set                   as S
 import           Outputable
+import           Var
+
+
+--------------------------------------------------------------------------------
+import           WhatMorphism.DirectedGraph (DirectedGraph)
+import qualified WhatMorphism.DirectedGraph as DG
 
 
 --------------------------------------------------------------------------------
@@ -43,9 +51,45 @@ whatMorphismRec name expr = do
     message $ "Analyzing " .++. pretty name
     message $ "Args: " .++. pretty args
     message $ "Body: " .++. pretty body
-    return ()
+    message $ "Graph:"
+
+    messageGraph $ fromBindVar name expr
+
+    message ""
   where
     (args, body) = arguments expr
+
+
+--------------------------------------------------------------------------------
+fromExpr :: Expr Var -> DirectedGraph Var
+fromExpr (Var x)         = DG.fromNode x
+fromExpr (Lit _)         = mempty
+fromExpr (App e a)       = fromExpr e `mappend` fromExpr a
+fromExpr (Lam x e)       = DG.fromNode x `mappend` fromExpr e  -- Special node?
+fromExpr (Let b e)       = fromBind b `mappend` fromExpr e
+fromExpr (Case e b _ as) =
+    let fromAlt (_, bs, e') =
+            mconcat [DG.fromEdge b' b | b' <- bs] `mappend`
+            fromExpr e'
+    in fromBindVar b e `mappend` mconcat [fromAlt a | a <- as]
+fromExpr (Cast e _)      = fromExpr e
+fromExpr (Tick _ e)      = fromExpr e
+fromExpr (Type _)        = mempty
+fromExpr (Coercion _)    = mempty
+
+
+--------------------------------------------------------------------------------
+fromBind :: Bind Var -> DirectedGraph Var
+fromBind b = case b of
+    NonRec x e -> fromBindVar x e
+    Rec bs     -> mconcat $ map (uncurry fromBindVar) bs
+
+
+--------------------------------------------------------------------------------
+fromBindVar :: Var -> Expr Var -> DirectedGraph Var
+fromBindVar x e =
+    let dg = fromExpr e
+    in DG.fromEdges x (DG.nodes dg) `mappend` dg
 
 
 --------------------------------------------------------------------------------
@@ -96,3 +140,12 @@ pretty :: Outputable a => a -> CoreM String
 pretty x = do
     dflags <- getDynFlags
     return $ showSDoc dflags $ ppr x
+
+
+--------------------------------------------------------------------------------
+messageGraph :: (Ord a, Outputable a) => DirectedGraph a -> CoreM ()
+messageGraph dg = mapM_ prettyPrint' $ S.toList (DG.nodes dg)
+  where
+    prettyPrint' x =
+        let nb = DG.neighbours x dg
+        in message $ pretty x .++. " -> " .++. pretty (S.toList nb)
