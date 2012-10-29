@@ -49,10 +49,9 @@ whatMorphism (Rec recs)   = mapM_ (uncurry whatMorphismRec) recs
 whatMorphismRec :: CoreBndr -> Expr CoreBndr -> CoreM ()
 whatMorphismRec name expr = do
     message $ "Analyzing " .++. pretty name
-    message $ "Args: " .++. pretty args
-    message $ "Body: " .++. pretty body
-    message $ "Graph:"
+    message $ pretty $ Rec [(name, expr)]
 
+    message $ "Graph:"
     messageGraph $ fromBindVar name expr
 
     message ""
