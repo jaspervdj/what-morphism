@@ -5,6 +5,7 @@ module WhatMorphism.Expr
     , everywhere
     , replace
     , toVar
+    , mkLambda
     , binds
     , foldExpr
     ) where

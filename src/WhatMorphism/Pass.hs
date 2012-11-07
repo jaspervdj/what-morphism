@@ -7,8 +7,7 @@ module WhatMorphism.Pass
 
 
 --------------------------------------------------------------------------------
-import           Coercion                   (Coercion)
-import           Control.Monad              (forM_, liftM2)
+import           Control.Monad              (foldM, forM_, liftM2)
 import           CoreMonad
 import           CoreSyn
 import           Data.List                  (findIndex)
@@ -19,6 +18,7 @@ import           Literal
 import           Outputable
 import           Type                       (Type)
 import           Var
+import qualified Var                        as Var
 
 
 --------------------------------------------------------------------------------
@@ -26,6 +26,7 @@ import           WhatMorphism.DirectedGraph (DirectedGraph)
 import qualified WhatMorphism.DirectedGraph as DG
 import           WhatMorphism.Expr
 import           WhatMorphism.Function
+import           WhatMorphism.RewriteM
 
 
 --------------------------------------------------------------------------------
@@ -52,12 +53,19 @@ whatMorphism bs = do
     forM_ (fromBinds bs) $ \(f, e) -> do
         message $ "Function: " .++. pretty f
         message $ "Body: " .++. pretty e
+        _ <- runRewriteM $ rewrite f e
+        return ()
+
+        message $ ""
+
+        {-
         message $ "Destructed: " .++. pretty (destruction bs)
 
         message ""
         message "SUBEXPRESSIONS"
         forM_ (subExprs e) $ message . pretty
         message ""
+        -}
 
 
 --------------------------------------------------------------------------------
@@ -65,9 +73,33 @@ destruction :: CoreBind -> [Int]
 destruction topBind =
     [ dIndex
     | (Function name args, body) <- fromBinds topBind
-    , (destr, alts)              <- topLevelCase body
+    , (destr, alts)              <- maybeToList $ topLevelCase body
     , dIndex                     <- maybeToList $ findIndex (== destr) args
     ]
+
+
+--------------------------------------------------------------------------------
+rewrite :: Function Var Var -> Expr Var -> RewriteM ()
+rewrite func body = do
+    let efunc = mapFunction Var func :: Function (Expr Var) (Expr Var)
+    (destr, alts) <- liftMaybe $ topLevelCase body
+    dIdx          <- liftMaybe $ findIndex (== destr) $ functionArgs func
+
+    liftCoreM $ forM_ alts $ \(ac, bnds, expr) -> do
+        message $ "AltCon: " .++. pretty ac
+        let step e b = do
+                message $ "Searching: " .++. pretty b
+                let needle = toAppExpr $ replaceArg dIdx (Var b) efunc
+                message $ "Replacing: " .++. pretty needle
+                mkLambda (Var.varType b) needle e
+
+        expr' <- foldM step expr bnds
+
+        message $ "Rewritten:" .++. pretty expr'
+
+        message $ ""
+
+        return expr'
 
 
 --------------------------------------------------------------------------------
@@ -77,9 +109,9 @@ destruction topBind =
 -- TODO: The second parameter of the Case is a variable which we bind the expr
 -- to, this variable should not be used in the case of a katamorphism, we need
 -- to check that, etc...
-topLevelCase :: Expr Var -> [(Var, [Alt Var])]
-topLevelCase (Case (Var b) _ _ alts) = [(b, alts)]
-topLevelCase _                       = []
+topLevelCase :: Expr Var -> Maybe (Var, [Alt Var])
+topLevelCase (Case (Var b) _ _ alts) = Just (b, alts)
+topLevelCase _                       = Nothing
 
 
 --------------------------------------------------------------------------------

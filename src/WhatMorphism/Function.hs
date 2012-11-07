@@ -2,12 +2,15 @@
 module WhatMorphism.Function
     ( Function (..)
     , fromAppExpr
+    , toAppExpr
     , fromBindExpr
     , fromBinds
 
     , toNamedFunction
     , varArgs
+    , mapFunction
     , mapArgs
+    , replaceArg
     , checkRecCall
     ) where
 
@@ -24,8 +27,10 @@ import           WhatMorphism.Expr
 
 --------------------------------------------------------------------------------
 -- | A function call or definition
-data Function f a = Function f [a]
-    deriving (Show)
+data Function f a = Function
+    { functionTerm :: f
+    , functionArgs :: [a]
+    } deriving (Show)
 
 
 --------------------------------------------------------------------------------
@@ -42,6 +47,11 @@ fromAppExpr = go []
     go as e
         | null as   = []
         | otherwise = [Function e $ reverse as]
+
+
+--------------------------------------------------------------------------------
+toAppExpr :: Function (Expr b) (Expr b) -> Expr b
+toAppExpr (Function f as) = foldr App f $ reverse as
 
 
 --------------------------------------------------------------------------------
@@ -77,8 +87,20 @@ varArgs (Function f as) = case mapM toVar as of
 
 
 --------------------------------------------------------------------------------
+mapFunction :: (a -> b) -> Function a a -> Function b b
+mapFunction g (Function f as) = Function (g f) (map g as)
+
+
+--------------------------------------------------------------------------------
 mapArgs :: (a -> b) -> Function f a -> Function f b
 mapArgs g (Function f as) = Function f $ map g as
+
+
+--------------------------------------------------------------------------------
+replaceArg :: Int -> a -> Function f a -> Function f a
+replaceArg idx a (Function f as) =
+    let (xs, ys) = splitAt idx as
+    in Function f $ xs ++ [a] ++ drop 1 ys
 
 
 --------------------------------------------------------------------------------
