@@ -7,18 +7,23 @@ module WhatMorphism.Pass
 
 
 --------------------------------------------------------------------------------
+import           Coercion                   (Coercion)
 import           Control.Monad              (liftM2)
 import           CoreMonad
 import           CoreSyn
 import           Data.Monoid                (mappend, mconcat, mempty)
 import qualified Data.Set                   as S
+import           Literal
 import           Outputable
+import           Type                       (Type)
 import           Var
 
 
 --------------------------------------------------------------------------------
 import           WhatMorphism.DirectedGraph (DirectedGraph)
 import qualified WhatMorphism.DirectedGraph as DG
+import           WhatMorphism.Expr
+import           WhatMorphism.Function
 
 
 --------------------------------------------------------------------------------
@@ -98,6 +103,28 @@ arguments = go []
   where
     go xs (Lam x e) = go (x : xs) e
     go xs e         = (reverse xs, e)
+
+
+--------------------------------------------------------------------------------
+-- | Collect all the simple calls to a certain function
+calls :: Var -> Expr Var -> [[Expr Var]]
+calls fname = undefined
+  where
+    {-
+    go   (Var _)   = []
+    go   (Lit _)   = []
+    go a@(App f a) = maybeToList (args a) ++ go f ++ go a
+    go   (Lam _ e) = go e
+    go   (Let b e) =
+    -}
+
+    args (App (Var f) a)
+        | f == fname = Just [a]
+        | otherwise  = Nothing
+    args (App f@(App _ _) a) = case args f of
+        Nothing -> Nothing
+        Just as -> Just $ a : as
+    args _ = Nothing
 
 
 --------------------------------------------------------------------------------

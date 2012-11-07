@@ -18,6 +18,8 @@ Library
 
   Other-modules:
     WhatMorphism.DirectedGraph
+    WhatMorphism.Expr
+    WhatMorphism.Function
     WhatMorphism.Pass
 
   Build-depends:
