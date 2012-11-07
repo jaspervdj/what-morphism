@@ -3,6 +3,7 @@
 module WhatMorphism.Expr
     ( subExprs
     , everywhere
+    , replace
     , toVar
     , binds
     , foldExpr
@@ -10,22 +11,23 @@ module WhatMorphism.Expr
 
 
 --------------------------------------------------------------------------------
-import           Coercion              (Coercion)
-import           CoreMonad             (CoreM)
+import           Coercion                   (Coercion)
+import           Control.Monad.State.Strict (State, modify, runState)
+import           CoreMonad                  (CoreM)
 import           CoreSyn
-import qualified Data.Generics.Schemes as Data
-import           Data.Typeable         (cast)
-import qualified IdInfo                as IdInfo
-import           Literal               (Literal)
-import qualified Name                  as Name
-import qualified OccName               as OccName
-import qualified SrcLoc                as SrcLoc
-import           Type                  (Type)
-import qualified UniqSupply            as Unique
-import qualified Unique                as Unique
-import           Unsafe.Coerce         (unsafeCoerce)
-import           Var                   (Id, Var)
-import qualified Var                   as Var
+import qualified Data.Generics.Schemes      as Data
+import           Data.Typeable              (cast)
+import qualified IdInfo                     as IdInfo
+import           Literal                    (Literal)
+import qualified Name                       as Name
+import qualified OccName                    as OccName
+import qualified SrcLoc                     as SrcLoc
+import           Type                       (Type)
+import qualified UniqSupply                 as Unique
+import qualified Unique                     as Unique
+import           Unsafe.Coerce              (unsafeCoerce)
+import           Var                        (Id, Var)
+import qualified Var                        as Var
 
 
 --------------------------------------------------------------------------------
@@ -50,6 +52,19 @@ everywhere f = Data.everywhere $ \x -> maybe x (unsafeCoerce . f) (cast x)
 
 
 --------------------------------------------------------------------------------
+-- | Count replacements
+replace :: (Expr Var -> Maybe (Expr Var)) -> Expr Var -> (Expr Var, Int)
+replace f = flip runState 0 . state
+  where
+    state :: Expr Var -> State Int (Expr Var)
+    state = Data.everywhereM $ \x -> case cast x of
+        Nothing -> return x
+        Just y  -> case f y of
+            Nothing -> return x
+            Just y' -> modify (+ 1) >> return (unsafeCoerce y')
+
+
+--------------------------------------------------------------------------------
 binds :: Bind b -> [(b, Expr b)]
 binds (NonRec b e) = [(b, e)]
 binds (Rec bs)     = bs
@@ -71,10 +86,16 @@ toVar _       = Nothing
 -- Becomes something like:
 --
 -- > (\tmp -> foo tmp + tmp) x
-mkLambda :: Type -> (Expr Var -> Bool) -> Expr Var -> CoreM (Expr Var)
-mkLambda typ pred expr = do
+mkLambda :: Type -> Expr Var -> Expr Var -> CoreM (Expr Var)
+mkLambda typ needle haystack = do
     tmp <- freshVar typ
-    return $ App (everywhere (\e -> if pred e && e .==. e then Var tmp else e) expr) undefined
+
+    let (haystack', repl) = replace
+            (\n -> if n .==. needle then Just (Var tmp) else Nothing) haystack
+
+    return $ if repl > 0
+        then Lam tmp haystack'
+        else haystack
 
 
 --------------------------------------------------------------------------------
