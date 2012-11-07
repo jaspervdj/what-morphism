@@ -82,6 +82,15 @@ topLevelCase (Case (Var b) _ _ alts) = [(b, alts)]
 topLevelCase _                       = []
 
 
+--------------------------------------------------------------------------------
+-- | Tries to float a recursive call.
+--
+--
+floatRecursion :: Int -> Function Var Var -> Var -> Var -> Expr Var -> Expr Var
+floatRecursion dindex def subterm fresh = everywhere $ \e ->
+    e
+
+
 {-
 --------------------------------------------------------------------------------
 whatMorphismRec :: CoreBndr -> Expr CoreBndr -> CoreM ()

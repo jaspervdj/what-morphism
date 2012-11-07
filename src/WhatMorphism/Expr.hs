@@ -2,6 +2,7 @@
 -- | Utilities for manipulating expressions
 module WhatMorphism.Expr
     ( subExprs
+    , everywhere
     , toVar
     , binds
     , foldExpr
@@ -9,11 +10,22 @@ module WhatMorphism.Expr
 
 
 --------------------------------------------------------------------------------
-import           Coercion (Coercion)
+import           Coercion              (Coercion)
+import           CoreMonad             (CoreM)
 import           CoreSyn
-import           Literal  (Literal)
-import           Type     (Type)
-import           Var      (Id, Var)
+import qualified Data.Generics.Schemes as Data
+import           Data.Typeable         (cast)
+import qualified IdInfo                as IdInfo
+import           Literal               (Literal)
+import qualified Name                  as Name
+import qualified OccName               as OccName
+import qualified SrcLoc                as SrcLoc
+import           Type                  (Type)
+import qualified UniqSupply            as Unique
+import qualified Unique                as Unique
+import           Unsafe.Coerce         (unsafeCoerce)
+import           Var                   (Id, Var)
+import qualified Var                   as Var
 
 
 --------------------------------------------------------------------------------
@@ -33,6 +45,11 @@ subExprs x = x : go x
 
 
 --------------------------------------------------------------------------------
+everywhere :: (Expr Var -> Expr Var) -> Expr Var -> Expr Var
+everywhere f = Data.everywhere $ \x -> maybe x (unsafeCoerce . f) (cast x)
+
+
+--------------------------------------------------------------------------------
 binds :: Bind b -> [(b, Expr b)]
 binds (NonRec b e) = [(b, e)]
 binds (Rec bs)     = bs
@@ -42,6 +59,95 @@ binds (Rec bs)     = bs
 toVar :: Expr Var -> Maybe Var
 toVar (Var v) = Just v
 toVar _       = Nothing
+
+
+--------------------------------------------------------------------------------
+-- | Remove an expression by creating a lambda
+--
+-- If we float out @x@, this:
+--
+-- > foo x + x
+--
+-- Becomes something like:
+--
+-- > (\tmp -> foo tmp + tmp) x
+mkLambda :: Type -> (Expr Var -> Bool) -> Expr Var -> CoreM (Expr Var)
+mkLambda typ pred expr = do
+    tmp <- freshVar typ
+    return $ App (everywhere (\e -> if pred e && e .==. e then Var tmp else e) expr) undefined
+
+
+--------------------------------------------------------------------------------
+-- | Generate a fresh variable
+freshVar :: Type -> CoreM Var
+freshVar typ = do
+    unique <- Unique.getUniqueM
+    let occn = OccName.mkVarOcc $ "wm_" ++ show (Unique.getKey unique)
+        name = Name.mkInternalName unique occn SrcLoc.noSrcSpan
+        var  = Var.mkLocalVar IdInfo.VanillaId name typ IdInfo.vanillaIdInfo
+    return var
+
+
+--------------------------------------------------------------------------------
+class SynEq a where
+    (.==.) :: a -> a -> Bool
+    infix 4 .==.
+
+
+--------------------------------------------------------------------------------
+instance SynEq Var where
+    x .==. y = x == y
+
+
+--------------------------------------------------------------------------------
+instance SynEq AltCon where
+    x .==. y = x == y
+
+
+--------------------------------------------------------------------------------
+instance SynEq Type where
+    -- If an entire syntax tree is equal, the types must be the same as well?
+    _ .==. _ = True
+
+
+--------------------------------------------------------------------------------
+instance SynEq b => SynEq (Expr b) where
+    Var x1 .==. Var x2 = x1 .==. x2
+    Lit x1 .==. Lit x2 = x1 == x2
+    App f1 a1 .==. App f2 a2 = f1 .==. f2 && a1 .==. a2
+    Lam b1 e1 .==. Lam b2 e2 = b1 .==. b2 && e1 .==. e2
+    Let b1 e1 .==. Let b2 e2 = b1 .==. b2 && e1 .==. e2
+    Case e1 b1 t1 as1 .==. Case e2 b2 t2 as2 =
+        e1 .==. e2 && b1 .==. b2 && t1 .==. t2 && as1 .==. as2
+    Cast e1 _ .==. Cast e2 _ = e1 .==. e2
+    Tick _ e1 .==. Tick _ e2 = e1 .==. e2
+    Type _ .==. Type _ = True
+    Coercion _ .==. Coercion _ = True
+    _ .==. _ = False
+
+
+--------------------------------------------------------------------------------
+instance SynEq b => SynEq (Bind b) where
+    NonRec b1 e1 .==. NonRec b2 e2 = b1 .==. b2 && e1 .==. e2
+    Rec es1      .==. Rec es2      = es1 .==. es2
+    _            .==. _            = False
+
+
+--------------------------------------------------------------------------------
+instance (SynEq a, SynEq b) => SynEq (a, b) where
+    (x1, y1) .==. (x2, y2) = x1 .==. x2 && y1 .==. y2
+
+
+--------------------------------------------------------------------------------
+instance (SynEq a, SynEq b, SynEq c) => SynEq (a, b, c) where
+    (x1, y1, z1) .==. (x2, y2, z2) = x1 .==. x2 && y1 .==. y2 && z1 .==. z2
+
+
+--------------------------------------------------------------------------------
+instance SynEq a => SynEq [a] where
+    []       .==. []       = True
+    (x : xs) .==. (y : ys) = x .==. y && xs .==. ys
+    _        .==. _        = False
 
 
 --------------------------------------------------------------------------------
@@ -61,7 +167,7 @@ foldExpr
     -> (Coercion -> a)                              -- ^ Coercion
     -> Expr b                                       -- ^ Expr to fold over
     -> a                                            -- ^ Result
-foldExpr var lit app lam bnrec brec cas cast tick typ coer = go
+foldExpr var lit app lam bnrec brec cas cast' tick typ coer = go
   where
     go (Var x)         = var x
     go (Lit x)         = lit x
@@ -71,7 +177,7 @@ foldExpr var lit app lam bnrec brec cas cast tick typ coer = go
         NonRec b' e' -> bnrec b' (go e') (go e)
         Rec bs       -> brec [(b', go e') | (b', e') <- bs] (go e)
     go (Case e b t as) = cas (go e) b t [(ac, bs, go e') | (ac, bs, e') <- as]
-    go (Cast e c)      = cast (go e) c
+    go (Cast e c)      = cast' (go e) c
     go (Tick t e)      = tick t (go e)
     go (Type t)        = typ t
     go (Coercion c)    = coer c
