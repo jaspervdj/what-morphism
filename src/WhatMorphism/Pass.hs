@@ -54,6 +54,11 @@ whatMorphism bs = do
         message $ "Body: " .++. pretty e
         message $ "Destructed: " .++. pretty (destruction bs)
 
+        message ""
+        message "SUBEXPRESSIONS"
+        forM_ (subExprs e) $ message . pretty
+        message ""
+
 
 --------------------------------------------------------------------------------
 destruction :: CoreBind -> [Int]

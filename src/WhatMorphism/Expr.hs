@@ -2,7 +2,9 @@
 -- | Utilities for manipulating expressions
 module WhatMorphism.Expr
     ( subExprs
+    , toVar
     , binds
+    , foldExpr
     ) where
 
 
@@ -23,7 +25,7 @@ subExprs x = x : go x
     go (App f a)       = subExprs f ++ subExprs a
     go (Lam _ e)       = subExprs e
     go (Let b e)       = concatMap subExprs (map snd $ binds b) ++ subExprs e
-    go (Case e _ _ as) = concatMap subExprs [a | (_, _, a) <- as]
+    go (Case e _ _ as) = subExprs e ++ concatMap subExprs [a | (_, _, a) <- as]
     go (Cast e _)      = subExprs e
     go (Tick _ e)      = subExprs e
     go (Type _)        = []
@@ -37,7 +39,14 @@ binds (Rec bs)     = bs
 
 
 --------------------------------------------------------------------------------
+toVar :: Expr Var -> Maybe Var
+toVar (Var v) = Just v
+toVar _       = Nothing
+
+
+--------------------------------------------------------------------------------
 -- | Since we love folds...
+-- TODO: Delete?
 foldExpr
     :: (Id -> a)                                    -- ^ Var
     -> (Literal -> a)                               -- ^ Lit

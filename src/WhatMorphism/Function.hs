@@ -4,12 +4,18 @@ module WhatMorphism.Function
     , fromAppExpr
     , fromBindExpr
     , fromBinds
+
+    , toNamedFunction
+    , varArgs
+    , mapArgs
+    , checkRecCall
     ) where
 
 
 --------------------------------------------------------------------------------
 import           CoreSyn
 import           Outputable
+import           Var               (Var)
 
 
 --------------------------------------------------------------------------------
@@ -55,3 +61,43 @@ fromBinds = concatMap (uncurry fromBind) . binds
         go as e
             | null as   = []
             | otherwise = [(Function b (reverse as), e)]
+
+
+--------------------------------------------------------------------------------
+toNamedFunction :: Function (Expr Var) a -> [Function Var a]
+toNamedFunction (Function (Var v) as) = [Function v as]
+toNamedFunction _                     = []
+
+
+--------------------------------------------------------------------------------
+varArgs :: Function f (Expr Var) -> [Function f Var]
+varArgs (Function f as) = case mapM toVar as of
+    Nothing  -> []
+    Just as' -> [Function f as']
+
+
+--------------------------------------------------------------------------------
+mapArgs :: (a -> b) -> Function f a -> Function f b
+mapArgs g (Function f as) = Function f $ map g as
+
+
+--------------------------------------------------------------------------------
+-- | Check the arguments of a recursive call. They should all be the same except
+-- for the one at some index which we previously determined.
+--
+-- If this is the case, we return the new variable at that index.
+checkRecCall :: Int -> Function Var Var -> Function Var Var -> [Var]
+checkRecCall dIndex (Function def dargs) (Function call cargs)
+    -- Should have the same name
+    | def /= call = []
+    | otherwise   = go 0 dargs cargs
+  where
+    go i (x : xs) (y : ys)
+        -- Should be the same
+        | i /= dIndex      = if x == y then go (i + 1) xs ys else []
+        -- Can be different, return called arg
+        | xs == ys         = [y]
+        -- But not if other arguments are different
+        | otherwise        = []
+    -- Different list lengths etc
+    go _ _        _        = []
