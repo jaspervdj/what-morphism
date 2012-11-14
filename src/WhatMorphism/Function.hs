@@ -11,6 +11,7 @@ module WhatMorphism.Function
     , mapFunction
     , mapArgs
     , replaceArg
+    , functionResultType
     , checkRecCall
     ) where
 
@@ -18,7 +19,10 @@ module WhatMorphism.Function
 --------------------------------------------------------------------------------
 import           CoreSyn
 import           Outputable
+import           Type              (Type)
+import qualified Type              as Type
 import           Var               (Var)
+import qualified Var               as Var
 
 
 --------------------------------------------------------------------------------
@@ -101,6 +105,16 @@ replaceArg :: Int -> a -> Function f a -> Function f a
 replaceArg idx a (Function f as) =
     let (xs, ys) = splitAt idx as
     in Function f $ xs ++ [a] ++ drop 1 ys
+
+
+--------------------------------------------------------------------------------
+functionResultType :: Function Var a -> Maybe Type
+functionResultType (Function f as) = go (Var.varType f) as
+  where
+    go t []      = Just t
+    go t (_ : r) = do
+        (_, res) <- Type.splitFunTy_maybe t
+        go res r
 
 
 --------------------------------------------------------------------------------

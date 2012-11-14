@@ -55,12 +55,13 @@ whatMorphism :: CoreBind -> CoreM ()
 whatMorphism bs = do
     _ <- runRewriteM $ do
         forM_ (fromBinds bs) $ \(f, e) -> do
+            message ""
             message $ "Function: " .++. pretty f
             message $ "Body: " .++. pretty e
             rewrite f e
             return ()
 
-            message $ ""
+            message ""
 
             {-
             message $ "Destructed: " .++. pretty (destruction bs)
@@ -88,6 +89,7 @@ destruction topBind =
 rewrite :: Function Var Var -> Expr Var -> RewriteM ()
 rewrite func body = do
     let efunc = mapFunction Var func :: Function (Expr Var) (Expr Var)
+    funTy         <- liftMaybe $ functionResultType func
     (destr, alts) <- liftMaybe $ topLevelCase body
     dIdx          <- liftMaybe $ findIndex (== destr) $ functionArgs func
 
@@ -99,17 +101,17 @@ rewrite func body = do
                 | Var.varType b `Type.eqType` Var.varType destr = do
                     let needle = replaceArg dIdx (Var b) efunc
                         expr   = toAppExpr needle
-                    lam <- liftCoreM $ mkLambda (Var.varType b) expr e
+                    lam <- liftCoreM $ mkLambda funTy expr e
                     if count (Var b) lam > 0
                         then throwError $ (dump b) ++ " still appears in body"
-                        else return $ (App lam expr)
+                        else return lam
 
                 -- Otherwise we can just create a lambda expression
                 | otherwise = do
                     lam <- liftCoreM $ mkLambda (Var.varType b) (Var b) e
-                    return (App lam (Var b))
+                    return lam
 
-        expr' <- foldM step expr bnds
+        expr' <- foldM step expr $ reverse bnds
 
         message $ "Rewritten: " .++. pretty expr'
 
