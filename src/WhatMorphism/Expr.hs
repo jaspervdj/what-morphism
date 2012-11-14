@@ -3,6 +3,7 @@
 module WhatMorphism.Expr
     ( subExprs
     , everywhere
+    , count
     , replace
     , toVar
     , mkLambda
@@ -55,6 +56,14 @@ subExprs x = x : go x
 --------------------------------------------------------------------------------
 everywhere :: (Expr Var -> Expr Var) -> Expr Var -> Expr Var
 everywhere f = Data.everywhere $ \x -> maybe x (unsafeCoerce . f) (cast x)
+
+
+--------------------------------------------------------------------------------
+-- | Just count occurences
+count :: Expr Var -> Expr Var -> Int
+count needle = Data.everything (+) $ \x -> case cast x of
+    Nothing -> 0
+    Just x' -> if x' .==. needle then 1 else 0
 
 
 --------------------------------------------------------------------------------

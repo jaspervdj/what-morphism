@@ -8,6 +8,7 @@ module WhatMorphism.Pass
 
 --------------------------------------------------------------------------------
 import           Control.Monad              (foldM, forM_, liftM2)
+import           Control.Monad.Error        (throwError)
 import           CoreMonad
 import           CoreSyn
 import           Data.List                  (findIndex)
@@ -25,6 +26,7 @@ import qualified Var                        as Var
 --------------------------------------------------------------------------------
 import           WhatMorphism.DirectedGraph (DirectedGraph)
 import qualified WhatMorphism.DirectedGraph as DG
+import           WhatMorphism.Dump
 import           WhatMorphism.Expr
 import           WhatMorphism.Function
 import           WhatMorphism.RewriteM
@@ -51,22 +53,25 @@ whatMorphismPass binds = do
 --------------------------------------------------------------------------------
 whatMorphism :: CoreBind -> CoreM ()
 whatMorphism bs = do
-    forM_ (fromBinds bs) $ \(f, e) -> do
-        message $ "Function: " .++. pretty f
-        message $ "Body: " .++. pretty e
-        _ <- runRewriteM $ rewrite f e
-        return ()
+    _ <- runRewriteM $ do
+        forM_ (fromBinds bs) $ \(f, e) -> do
+            message $ "Function: " .++. pretty f
+            message $ "Body: " .++. pretty e
+            rewrite f e
+            return ()
 
-        message $ ""
+            message $ ""
 
-        {-
-        message $ "Destructed: " .++. pretty (destruction bs)
+            {-
+            message $ "Destructed: " .++. pretty (destruction bs)
 
-        message ""
-        message "SUBEXPRESSIONS"
-        forM_ (subExprs e) $ message . pretty
-        message ""
-        -}
+            message ""
+            message "SUBEXPRESSIONS"
+            forM_ (subExprs e) $ message . pretty
+            message ""
+            -}
+
+    return ()
 
 
 --------------------------------------------------------------------------------
@@ -86,16 +91,20 @@ rewrite func body = do
     (destr, alts) <- liftMaybe $ topLevelCase body
     dIdx          <- liftMaybe $ findIndex (== destr) $ functionArgs func
 
-    liftCoreM $ forM_ alts $ \(ac, bnds, expr) -> do
+    forM_ alts $ \(ac, bnds, expr) -> do
         message $ "AltCon: " .++. pretty ac
-        let step :: Expr Var -> Var -> CoreM (Expr Var)
+        let step :: Expr Var -> Var -> RewriteM (Expr Var)
             step e b
                 | Var.varType b `Type.eqType` Var.varType destr = do
-                    message $ "Searching: " .++. pretty b
                     let needle = replaceArg dIdx (Var b) efunc
+                        expr   = toAppExpr needle
+                    message $ "Searching: " .++. pretty b
                     message $ "Replacing: " .++. pretty needle
-                    mkLambda (Var.varType b) (toAppExpr needle) e
-                    -- mkLambda (Var.varType b) (Var b) e
+                    lam <- liftCoreM $ mkLambda (Var.varType b) expr e
+                    if count (Var b) lam > 0
+                        then throwError $ (dump b) ++ " still appears in body"
+                        else return $ (App lam expr)
+
                 | otherwise = return e
 
         expr' <- foldM step expr bnds
@@ -103,8 +112,6 @@ rewrite func body = do
         message $ "Rewritten: " .++. pretty expr'
 
         message $ ""
-
-        return expr'
 
 
 --------------------------------------------------------------------------------
@@ -191,8 +198,8 @@ instance ToTrace (CoreM String) where
 
 
 --------------------------------------------------------------------------------
-message :: ToTrace a => a -> CoreM ()
-message x = unTrace (toTrace x) >>= putMsgS
+message :: ToTrace a => a -> RewriteM ()
+message x = liftCoreM $ unTrace (toTrace x) >>= putMsgS
 
 
 --------------------------------------------------------------------------------
@@ -208,7 +215,7 @@ pretty x = do
 
 
 --------------------------------------------------------------------------------
-messageGraph :: (Ord a, Outputable a) => DirectedGraph a -> CoreM ()
+messageGraph :: (Ord a, Outputable a) => DirectedGraph a -> RewriteM ()
 messageGraph dg = mapM_ prettyPrint' $ S.toList (DG.nodes dg)
   where
     prettyPrint' x =

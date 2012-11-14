@@ -1,4 +1,7 @@
 --------------------------------------------------------------------------------
+{-# LANGUAGE FlexibleInstances     #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeSynonymInstances  #-}
 module WhatMorphism.RewriteM
     ( RewriteM
     , runRewriteM
@@ -8,9 +11,10 @@ module WhatMorphism.RewriteM
 
 
 --------------------------------------------------------------------------------
-import           CoreMonad  (CoreM)
-import           UniqSupply (MonadUnique (..))
-import qualified UniqSupply as Unique
+import           Control.Monad.Error (MonadError (..))
+import           CoreMonad           (CoreM)
+import           UniqSupply          (MonadUnique (..))
+import qualified UniqSupply          as Unique
 
 
 --------------------------------------------------------------------------------
@@ -43,6 +47,16 @@ instance Monad RewriteM where
 --------------------------------------------------------------------------------
 instance Unique.MonadUnique RewriteM where
     getUniqueSupplyM = liftCoreM getUniqueSupplyM
+
+
+--------------------------------------------------------------------------------
+instance MonadError String RewriteM where
+    throwError err             = RewriteM $ return $ Left err
+    catchError (RewriteM mx) f = RewriteM $ do
+        x <- mx
+        case x of
+            Left e  -> unRewriteM $ f e
+            Right x -> return $ Right x
 
 
 --------------------------------------------------------------------------------
