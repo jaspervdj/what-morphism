@@ -7,15 +7,16 @@ module WhatMorphism.Pass
 
 
 --------------------------------------------------------------------------------
-import           Control.Monad              (foldM, forM, forM_, liftM2)
+import           Control.Monad              (foldM, forM, forM_, liftM2, when)
 import           Control.Monad.Error        (throwError)
 import           CoreMonad
 import           CoreSyn
 import           Data.List                  (findIndex)
-import           Data.Maybe                 (maybeToList)
+import           Data.Maybe                 (fromMaybe, maybeToList)
 import           Data.Monoid                (mappend, mconcat, mempty)
 import qualified Data.Set                   as S
 import           Literal
+import qualified Name                       as Name
 import           Outputable
 import           Type                       (Type)
 import qualified Type                       as Type
@@ -53,7 +54,7 @@ whatMorphismPass binds = do
 --------------------------------------------------------------------------------
 whatMorphism :: CoreBind -> CoreM ()
 whatMorphism bs = do
-    _ <- runRewriteM $ do
+    res <- runRewriteM $ do
         forM_ (fromBinds bs) $ \(f, e) -> do
             message ""
             message $ "Function: " .++. pretty f
@@ -71,6 +72,10 @@ whatMorphism bs = do
             forM_ (subExprs e) $ message . pretty
             message ""
             -}
+
+    _ <- runRewriteM $ case res of
+        Left err -> message $ "Rewrite failed: " ++ err
+        Right x  -> message "OK"
 
     return ()
 
@@ -117,8 +122,20 @@ rewrite func body = do
 
         return (ac, binds, expr')
 
+    when (any isListConstructor [ac | (ac, _, _) <- alts']) $
+        message "I'm pretty sure this is a foldr!"
 
     return ()
+
+
+--------------------------------------------------------------------------------
+isListConstructor :: AltCon -> Bool
+isListConstructor ac = fromMaybe False $ do
+    dc <- dataAlt ac
+    return $ Name.occNameString (Name.getOccName dc) `elem` [":", "[]"]
+  where
+    dataAlt (DataAlt c) = Just c
+    dataAlt _           = Nothing
 
 
 --------------------------------------------------------------------------------

@@ -8,6 +8,7 @@ module WhatMorphism.Dump
 import           Coercion  (Coercion)
 import           CoreSyn
 import           Data.List (intercalate)
+import           DataCon   (DataCon)
 import           Literal   (Literal)
 import qualified Name      as Name
 import qualified OccName   as OccName
@@ -42,8 +43,15 @@ instance Dump Var where
 
 
 --------------------------------------------------------------------------------
+instance Dump DataCon where
+    dump = OccName.occNameString . Name.getOccName
+
+
+--------------------------------------------------------------------------------
 instance Dump AltCon where
-    dump _ = "<AltCon>"
+    dump (DataAlt x) = dc "DataAlt" [dump x]
+    dump (LitAlt x)  = dc "Literal" [dump x]
+    dump DEFAULT     = dc "DEFAULT" []
 
 
 --------------------------------------------------------------------------------
@@ -88,4 +96,5 @@ instance Dump b => Dump (Expr b) where
 
 --------------------------------------------------------------------------------
 dc :: String -> [String] -> String
+dc constr []   = constr
 dc constr args = "(" ++ constr ++ " " ++ intercalate " " args ++ ")"
