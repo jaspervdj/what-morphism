@@ -7,7 +7,7 @@ module WhatMorphism.Pass
 
 
 --------------------------------------------------------------------------------
-import           Control.Monad              (foldM, forM_, liftM2)
+import           Control.Monad              (foldM, forM, forM_, liftM2)
 import           Control.Monad.Error        (throwError)
 import           CoreMonad
 import           CoreSyn
@@ -91,27 +91,32 @@ rewrite func body = do
     (destr, alts) <- liftMaybe $ topLevelCase body
     dIdx          <- liftMaybe $ findIndex (== destr) $ functionArgs func
 
-    forM_ alts $ \(ac, bnds, expr) -> do
+    alts' <- forM alts $ \(ac, bnds, expr) -> do
         message $ "AltCon: " .++. pretty ac
         let step :: Expr Var -> Var -> RewriteM (Expr Var)
             step e b
+                -- The same type should be destroyed in the same way for now
                 | Var.varType b `Type.eqType` Var.varType destr = do
                     let needle = replaceArg dIdx (Var b) efunc
                         expr   = toAppExpr needle
-                    message $ "Searching: " .++. pretty b
-                    message $ "Replacing: " .++. pretty needle
                     lam <- liftCoreM $ mkLambda (Var.varType b) expr e
                     if count (Var b) lam > 0
                         then throwError $ (dump b) ++ " still appears in body"
                         else return $ (App lam expr)
 
-                | otherwise = return e
+                -- Otherwise we can just create a lambda expression
+                | otherwise = do
+                    lam <- liftCoreM $ mkLambda (Var.varType b) (Var b) e
+                    return (App lam (Var b))
 
         expr' <- foldM step expr bnds
 
         message $ "Rewritten: " .++. pretty expr'
 
-        message $ ""
+        return (ac, binds, expr')
+
+
+    return ()
 
 
 --------------------------------------------------------------------------------

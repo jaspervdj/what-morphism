@@ -105,12 +105,10 @@ mkLambda :: Type -> Expr Var -> Expr Var -> CoreM (Expr Var)
 mkLambda typ needle haystack = do
     tmp <- freshVar typ
 
-    let check n =
-            let eq = n .==. needle
-            in trace (dump needle ++ " =?= " ++ dump n ++ " -> " ++ show eq) $
-                if eq then Just (Var tmp) else Nothing
-
-        (haystack', repl) = replace check haystack
+    let check n
+            | n .==. needle = Just (Var tmp)
+            | otherwise     = Nothing
+        (haystack', repl)   = replace check haystack
 
     return $ if repl > 0
         then Lam tmp haystack'
