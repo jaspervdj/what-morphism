@@ -18,6 +18,7 @@ Library
 
   Other-modules:
     WhatMorphism.DirectedGraph
+    WhatMorphism.Dump
     WhatMorphism.Expr
     WhatMorphism.Function
     WhatMorphism.Pass

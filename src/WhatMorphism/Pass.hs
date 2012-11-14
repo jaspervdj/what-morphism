@@ -17,6 +17,7 @@ import qualified Data.Set                   as S
 import           Literal
 import           Outputable
 import           Type                       (Type)
+import qualified Type                       as Type
 import           Var
 import qualified Var                        as Var
 
@@ -87,15 +88,19 @@ rewrite func body = do
 
     liftCoreM $ forM_ alts $ \(ac, bnds, expr) -> do
         message $ "AltCon: " .++. pretty ac
-        let step e b = do
-                message $ "Searching: " .++. pretty b
-                let needle = toAppExpr $ replaceArg dIdx (Var b) efunc
-                message $ "Replacing: " .++. pretty needle
-                mkLambda (Var.varType b) needle e
+        let step :: Expr Var -> Var -> CoreM (Expr Var)
+            step e b
+                | Var.varType b `Type.eqType` Var.varType destr = do
+                    message $ "Searching: " .++. pretty b
+                    let needle = replaceArg dIdx (Var b) efunc
+                    message $ "Replacing: " .++. pretty needle
+                    mkLambda (Var.varType b) (toAppExpr needle) e
+                    -- mkLambda (Var.varType b) (Var b) e
+                | otherwise = return e
 
         expr' <- foldM step expr bnds
 
-        message $ "Rewritten:" .++. pretty expr'
+        message $ "Rewritten: " .++. pretty expr'
 
         message $ ""
 

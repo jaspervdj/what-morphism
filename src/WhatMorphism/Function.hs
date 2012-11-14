@@ -51,7 +51,7 @@ fromAppExpr = go []
 
 --------------------------------------------------------------------------------
 toAppExpr :: Function (Expr b) (Expr b) -> Expr b
-toAppExpr (Function f as) = foldr App f $ reverse as
+toAppExpr (Function f []) = foldr (flip App) f $ reverse as
 
 
 --------------------------------------------------------------------------------

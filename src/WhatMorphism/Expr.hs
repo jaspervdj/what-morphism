@@ -18,6 +18,7 @@ import           CoreMonad                  (CoreM)
 import           CoreSyn
 import qualified Data.Generics.Schemes      as Data
 import           Data.Typeable              (cast)
+import           Debug.Trace
 import qualified IdInfo                     as IdInfo
 import           Literal                    (Literal)
 import qualified Name                       as Name
@@ -29,6 +30,10 @@ import qualified Unique                     as Unique
 import           Unsafe.Coerce              (unsafeCoerce)
 import           Var                        (Id, Var)
 import qualified Var                        as Var
+
+
+--------------------------------------------------------------------------------
+import           WhatMorphism.Dump
 
 
 --------------------------------------------------------------------------------
@@ -91,8 +96,12 @@ mkLambda :: Type -> Expr Var -> Expr Var -> CoreM (Expr Var)
 mkLambda typ needle haystack = do
     tmp <- freshVar typ
 
-    let (haystack', repl) = replace
-            (\n -> if n .==. needle then Just (Var tmp) else Nothing) haystack
+    let check n =
+            let eq = n .==. needle
+            in trace (dump needle ++ " =?= " ++ dump n ++ " -> " ++ show eq) $
+                if eq then Just (Var tmp) else Nothing
+
+        (haystack', repl) = replace check haystack
 
     return $ if repl > 0
         then Lam tmp haystack'
@@ -106,7 +115,8 @@ freshVar typ = do
     unique <- Unique.getUniqueM
     let occn = OccName.mkVarOcc $ "wm_" ++ show (Unique.getKey unique)
         name = Name.mkInternalName unique occn SrcLoc.noSrcSpan
-        var  = Var.mkLocalVar IdInfo.VanillaId name typ IdInfo.vanillaIdInfo
+        -- var  = Var.mkLocalVar IdInfo.VanillaId name typ IdInfo.vanillaIdInfo
+        var  = Var.mkCoVar name typ
     return var
 
 
@@ -118,7 +128,8 @@ class SynEq a where
 
 --------------------------------------------------------------------------------
 instance SynEq Var where
-    x .==. y = x == y
+    x .==. y =
+        Name.getOccName (Var.varName x) == Name.getOccName (Var.varName y)
 
 
 --------------------------------------------------------------------------------
@@ -141,10 +152,12 @@ instance SynEq b => SynEq (Expr b) where
     Let b1 e1 .==. Let b2 e2 = b1 .==. b2 && e1 .==. e2
     Case e1 b1 t1 as1 .==. Case e2 b2 t2 as2 =
         e1 .==. e2 && b1 .==. b2 && t1 .==. t2 && as1 .==. as2
-    Cast e1 _ .==. Cast e2 _ = e1 .==. e2
-    Tick _ e1 .==. Tick _ e2 = e1 .==. e2
     Type _ .==. Type _ = True
     Coercion _ .==. Coercion _ = True
+
+    c1@(Cast e1 _) .==. c2@(Cast e2 _) = e1 .==. e2 || c1 .==. e2 || e1 .==. c2
+    t1@(Tick _ e1) .==. t2@(Tick _ e2) = e1 .==. e2 || t1 .==. e2 || e1 .==. t2
+
     _ .==. _ = False
 
 
