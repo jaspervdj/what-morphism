@@ -7,26 +7,20 @@ module WhatMorphism.Pass
 
 
 --------------------------------------------------------------------------------
-import           Control.Monad              (foldM, forM, forM_, liftM2, when)
-import           Control.Monad.Error        (throwError)
+import           Control.Monad         (foldM, forM, forM_, liftM2, when)
+import           Control.Monad.Error   (throwError)
 import           CoreMonad
 import           CoreSyn
-import           Data.List                  (findIndex)
-import           Data.Maybe                 (fromMaybe, maybeToList)
-import           Data.Monoid                (mappend, mconcat, mempty)
-import qualified Data.Set                   as S
-import           Literal
-import qualified Name                       as Name
+import           Data.List             (findIndex)
+import           Data.Maybe            (fromMaybe)
+import qualified Name                  as Name
 import           Outputable
-import           Type                       (Type)
-import qualified Type                       as Type
+import           Type                  (Type)
+import qualified Type                  as Type
 import           Var
-import qualified Var                        as Var
 
 
 --------------------------------------------------------------------------------
-import           WhatMorphism.DirectedGraph (DirectedGraph)
-import qualified WhatMorphism.DirectedGraph as DG
 import           WhatMorphism.Dump
 import           WhatMorphism.Expr
 import           WhatMorphism.Function
@@ -35,9 +29,9 @@ import           WhatMorphism.RewriteM
 
 --------------------------------------------------------------------------------
 whatMorphismPass :: [CoreBind] -> CoreM [CoreBind]
-whatMorphismPass binds = do
-    mapM_ whatMorphism binds
-    return binds
+whatMorphismPass binds' = do
+    mapM_ whatMorphism binds'
+    return binds'
 
 
 --------------------------------------------------------------------------------
@@ -75,19 +69,9 @@ whatMorphism bs = do
 
     _ <- runRewriteM $ case res of
         Left err -> message $ "Rewrite failed: " ++ err
-        Right x  -> message "OK"
+        Right _x -> message "OK"
 
     return ()
-
-
---------------------------------------------------------------------------------
-destruction :: CoreBind -> [Int]
-destruction topBind =
-    [ dIndex
-    | (Function name args, body) <- fromBinds topBind
-    , (destr, _, _alts)          <- maybeToList $ topLevelCase body
-    , dIndex                     <- maybeToList $ findIndex (== destr) args
-    ]
 
 
 --------------------------------------------------------------------------------
@@ -105,8 +89,8 @@ rewrite func body = do
                 -- The same type should be destroyed in the same way for now
                 | Var.varType b `Type.eqType` Var.varType destr = do
                     let needle = replaceArg dIdx (Var b) efunc
-                        expr   = toAppExpr needle
-                    lam <- liftCoreM $ mkLambda cTyp expr e
+                        expr'  = toAppExpr needle
+                    lam <- liftCoreM $ mkLambda cTyp expr' e
                     if count (Var b) lam > 0
                         then throwError $
                             (dump b) ++ " still appears in body: " ++ dump lam
@@ -152,53 +136,6 @@ topLevelCase _                       = Nothing
 
 
 --------------------------------------------------------------------------------
--- | Tries to float a recursive call.
---
---
-floatRecursion :: Int -> Function Var Var -> Var -> Var -> Expr Var -> Expr Var
-floatRecursion dindex def subterm fresh = everywhere $ \e ->
-    e
-
-
-{-
---------------------------------------------------------------------------------
-whatMorphismRec :: CoreBndr -> Expr CoreBndr -> CoreM ()
-whatMorphismRec name expr = do
-    message $ "Analyzing " .++. pretty name
-    message $ pretty $ Rec [(name, expr)]
-
-    message $ "Graph:"
-    messageGraph $ fromBindVar name expr
-
-    message ""
-  where
-    (args, body) = arguments expr
--}
-
-
---------------------------------------------------------------------------------
--- | Collect all the simple calls to a certain function
-calls :: Var -> Expr Var -> [[Expr Var]]
-calls fname = undefined
-  where
-    {-
-    go   (Var _)   = []
-    go   (Lit _)   = []
-    go a@(App f a) = maybeToList (args a) ++ go f ++ go a
-    go   (Lam _ e) = go e
-    go   (Let b e) =
-    -}
-
-    args (App (Var f) a)
-        | f == fname = Just [a]
-        | otherwise  = Nothing
-    args (App f@(App _ _) a) = case args f of
-        Nothing -> Nothing
-        Just as -> Just $ a : as
-    args _ = Nothing
-
-
---------------------------------------------------------------------------------
 data Trace = Trace {unTrace :: CoreM String}
 
 
@@ -237,12 +174,3 @@ pretty :: Outputable a => a -> CoreM String
 pretty x = do
     dflags <- getDynFlags
     return $ showSDoc dflags $ ppr x
-
-
---------------------------------------------------------------------------------
-messageGraph :: (Ord a, Outputable a) => DirectedGraph a -> RewriteM ()
-messageGraph dg = mapM_ prettyPrint' $ S.toList (DG.nodes dg)
-  where
-    prettyPrint' x =
-        let nb = DG.neighbours x dg
-        in message $ pretty x .++. " -> " .++. pretty (S.toList nb)

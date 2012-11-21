@@ -18,11 +18,7 @@ import           Control.Monad.State.Strict (State, modify, runState)
 import           CoreMonad                  (CoreM)
 import           CoreSyn
 import qualified Data.Generics.Schemes      as Data
-import           Data.Maybe                 (isJust)
 import           Data.Typeable              (cast)
-import           Debug.Trace
-import           Debug.Trace
-import qualified IdInfo                     as IdInfo
 import           Literal                    (Literal)
 import qualified Name                       as Name
 import qualified OccName                    as OccName
@@ -34,10 +30,6 @@ import qualified Unique                     as Unique
 import           Unsafe.Coerce              (unsafeCoerce)
 import           Var                        (Id, Var)
 import qualified Var                        as Var
-
-
---------------------------------------------------------------------------------
-import           WhatMorphism.Dump
 
 
 --------------------------------------------------------------------------------
@@ -108,9 +100,9 @@ mkLambda :: Type -> Expr Var -> Expr Var -> CoreM (Expr Var)
 mkLambda typ needle haystack = do
     tmp <- freshVar typ
 
-    let check n =
-            let eq = if n .==. needle then Just (Var tmp) else Nothing
-            in trace (dump needle ++ " .==. " ++ dump n ++ " => " ++ show (isJust eq)) eq
+    let check n
+            | n .==. needle = Just (Var tmp)
+            | otherwise     = Nothing
         (haystack', repl)   = replace check haystack
 
     return $ if repl > 0

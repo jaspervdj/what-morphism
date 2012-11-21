@@ -18,14 +18,10 @@ module WhatMorphism.Function
 --------------------------------------------------------------------------------
 import           CoreSyn
 import           Outputable
-import           Type              (Type)
-import qualified Type              as Type
 import           Var               (Var)
-import qualified Var               as Var
 
 
 --------------------------------------------------------------------------------
-import           WhatMorphism.Dump
 import           WhatMorphism.Expr
 
 
