@@ -18,7 +18,9 @@ import           Control.Monad.State.Strict (State, modify, runState)
 import           CoreMonad                  (CoreM)
 import           CoreSyn
 import qualified Data.Generics.Schemes      as Data
+import           Data.Maybe                 (isJust)
 import           Data.Typeable              (cast)
+import           Debug.Trace
 import           Debug.Trace
 import qualified IdInfo                     as IdInfo
 import           Literal                    (Literal)
@@ -26,6 +28,7 @@ import qualified Name                       as Name
 import qualified OccName                    as OccName
 import qualified SrcLoc                     as SrcLoc
 import           Type                       (Type)
+import qualified Type                       as Type
 import qualified UniqSupply                 as Unique
 import qualified Unique                     as Unique
 import           Unsafe.Coerce              (unsafeCoerce)
@@ -105,9 +108,9 @@ mkLambda :: Type -> Expr Var -> Expr Var -> CoreM (Expr Var)
 mkLambda typ needle haystack = do
     tmp <- freshVar typ
 
-    let check n
-            | n .==. needle = Just (Var tmp)
-            | otherwise     = Nothing
+    let check n =
+            let eq = if n .==. needle then Just (Var tmp) else Nothing
+            in trace (dump needle ++ " .==. " ++ dump n ++ " => " ++ show (isJust eq)) eq
         (haystack', repl)   = replace check haystack
 
     return $ if repl > 0
@@ -162,8 +165,11 @@ instance SynEq b => SynEq (Expr b) where
     Type _ .==. Type _ = True
     Coercion _ .==. Coercion _ = True
 
-    c1@(Cast e1 _) .==. c2@(Cast e2 _) = e1 .==. e2 || c1 .==. e2 || e1 .==. c2
-    t1@(Tick _ e1) .==. t2@(Tick _ e2) = e1 .==. e2 || t1 .==. e2 || e1 .==. t2
+    -- In some cases, a type can equal a variable
+    Var v .==. Type t = case Type.getTyVar_maybe t of
+        Just v' -> v .==. v'
+        Nothing -> False
+    t@(Type _) .==. v@(Var _) = v .==. t
 
     _ .==. _ = False
 

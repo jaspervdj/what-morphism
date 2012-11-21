@@ -7,6 +7,7 @@ module WhatMorphism.RewriteM
     , runRewriteM
     , liftCoreM
     , liftMaybe
+    , liftMaybe'
     ) where
 
 
@@ -55,8 +56,8 @@ instance MonadError String RewriteM where
     catchError (RewriteM mx) f = RewriteM $ do
         x <- mx
         case x of
-            Left e  -> unRewriteM $ f e
-            Right x -> return $ Right x
+            Left e   -> unRewriteM $ f e
+            Right x' -> return $ Right x'
 
 
 --------------------------------------------------------------------------------
@@ -70,7 +71,11 @@ liftCoreM = RewriteM . fmap Right
 
 
 --------------------------------------------------------------------------------
-liftMaybe :: Maybe a -> RewriteM a
-liftMaybe Nothing  = RewriteM $ return $ Left "WhatMorphism.RewriteM.liftMaybe"
-liftMaybe (Just x) = RewriteM $ return $ Right x
+liftMaybe :: String -> Maybe a -> RewriteM a
+liftMaybe err m = RewriteM $ return $ maybe (Left err) Right m
 {-# INLINE liftMaybe #-}
+
+
+--------------------------------------------------------------------------------
+liftMaybe' :: Maybe a -> RewriteM a
+liftMaybe' = liftMaybe "WhatMorphism.RewriteM.liftMaybe'"

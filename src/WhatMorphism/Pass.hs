@@ -85,7 +85,7 @@ destruction :: CoreBind -> [Int]
 destruction topBind =
     [ dIndex
     | (Function name args, body) <- fromBinds topBind
-    , (destr, alts)              <- maybeToList $ topLevelCase body
+    , (destr, _, _alts)          <- maybeToList $ topLevelCase body
     , dIndex                     <- maybeToList $ findIndex (== destr) args
     ]
 
@@ -94,9 +94,9 @@ destruction topBind =
 rewrite :: Function Var Var -> Expr Var -> RewriteM ()
 rewrite func body = do
     let efunc = mapFunction Var func :: Function (Expr Var) (Expr Var)
-    funTy         <- liftMaybe $ functionResultType func
-    (destr, alts) <- liftMaybe $ topLevelCase body
-    dIdx          <- liftMaybe $ findIndex (== destr) $ functionArgs func
+    (destr, cTyp, alts) <- liftMaybe "topLevelCase" $ topLevelCase body
+    dIdx                <- liftMaybe "findIndex" $
+        findIndex (== destr) $ functionArgs func
 
     alts' <- forM alts $ \(ac, bnds, expr) -> do
         message $ "AltCon: " .++. pretty ac
@@ -106,9 +106,10 @@ rewrite func body = do
                 | Var.varType b `Type.eqType` Var.varType destr = do
                     let needle = replaceArg dIdx (Var b) efunc
                         expr   = toAppExpr needle
-                    lam <- liftCoreM $ mkLambda funTy expr e
+                    lam <- liftCoreM $ mkLambda cTyp expr e
                     if count (Var b) lam > 0
-                        then throwError $ (dump b) ++ " still appears in body"
+                        then throwError $
+                            (dump b) ++ " still appears in body: " ++ dump lam
                         else return lam
 
                 -- Otherwise we can just create a lambda expression
@@ -145,8 +146,8 @@ isListConstructor ac = fromMaybe False $ do
 -- TODO: The second parameter of the Case is a variable which we bind the expr
 -- to, this variable should not be used in the case of a katamorphism, we need
 -- to check that, etc...
-topLevelCase :: Expr Var -> Maybe (Var, [Alt Var])
-topLevelCase (Case (Var b) _ _ alts) = Just (b, alts)
+topLevelCase :: Expr Var -> Maybe (Var, Type, [Alt Var])
+topLevelCase (Case (Var b) _ t alts) = Just (b, t, alts)
 topLevelCase _                       = Nothing
 
 
