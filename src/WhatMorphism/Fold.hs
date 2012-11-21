@@ -10,14 +10,14 @@ module WhatMorphism.Fold
 
 
 --------------------------------------------------------------------------------
-class Functor (FoldFunctor t) => Fold t where
-    type FoldFunctor t :: * -> *
+class Functor (Recursive t) => Fold t where
+    type Recursive t :: * -> *
 
-    out :: t -> FoldFunctor t t
+    out :: t -> Recursive t t
 
 
 --------------------------------------------------------------------------------
-type Algebra t a = Fold t => FoldFunctor t a -> a
+type Algebra t a = Fold t => Recursive t a -> a
 
 
 --------------------------------------------------------------------------------
@@ -40,7 +40,7 @@ instance Functor (ListF a) where
 
 --------------------------------------------------------------------------------
 instance Fold [a] where
-    type FoldFunctor [a] = ListF a
+    type Recursive [a] = ListF a
 
     out []       = NilF
     out (x : xs) = ConsF x xs
@@ -79,7 +79,7 @@ instance Functor (TreeF a) where
 
 --------------------------------------------------------------------------------
 instance Fold (Tree a) where
-    type FoldFunctor (Tree a) = TreeF a
+    type Recursive (Tree a) = TreeF a
 
     out Empty          = EmptyF
     out (Branch x l r) = BranchF x l r
