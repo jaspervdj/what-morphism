@@ -1,6 +1,5 @@
 --------------------------------------------------------------------------------
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE Rank2Types       #-}
 {-# LANGUAGE TypeFamilies     #-}
 module WhatMorphism.Fold
     ( Fold (..)
@@ -17,7 +16,7 @@ class Functor (Recursive t) => Fold t where
 
 
 --------------------------------------------------------------------------------
-type Algebra t a = Fold t => Recursive t a -> a
+type Algebra t a = Recursive t a -> a
 
 
 --------------------------------------------------------------------------------
