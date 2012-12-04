@@ -1,0 +1,70 @@
+\documentclass[11pt]{article}
+
+\usepackage{amsmath}
+
+\begin{document}
+
+\section{Recap}
+
+Functor laws:
+
+\begin{align}
+    fmap ~ id =& ~ id
+    \label{1st-functor-law} \\
+    fmap ~ (f \cdot g) =& ~ fmap ~ f \cdot fmap ~ g
+    \label{2nd-functor-law}
+\end{align}
+
+\section{Fold typeclass}
+
+Laws
+
+\begin{align}{lr}
+    toRecF \cdot fromRecF =& ~ id
+    \label{to-rec-f-id} \\
+    fromRecF \cdot toRecF =& ~ id
+    \label{from-rec-f-id}
+\end{align}
+
+Note: the following proof only holds for \emph{finite} data structures, where we
+have a base case.
+
+\begin{equation}
+  fold ~ fromRecF = id
+\end{equation}
+
+Base case for lists:
+
+\begin{equation*}
+  \begin{array}{lll}
+     & fold ~ fromRecF ~ [] \\
+    =& fromRecF ~ (fmap ~ (fold ~ fromRecF) ~ (toRecF ~ []))
+     & \text{(definition fold)} \\
+    =& fromRecF ~ (fmap ~ (fold ~ fromRecF) ~ NilF)
+     & \text{(definition toRecF)} \\
+    =& fromRecF ~ NilF
+     & \text{(ListF functor)} \\
+    =& []
+     & \text{(definition fromRecF)} \\
+  \end{array}
+\end{equation*}
+
+Can we make this more abstract by relying on structure from RecF?
+
+Induction step:
+
+\begin{equation*}
+  \begin{array}{lll}
+     & fold ~ fromRecF \\
+    =& fromRecF \cdot fmap ~ (fold ~ fromRecF) \cdot toRecF
+     & \text{(definition fold)} \\
+    =& fromRecF \cdot fmap ~ id \cdot toRecF
+     & \text{(induction hypothesis)} \\
+    =& fromRecF \cdot toRecF
+     & \text{(see \ref{1st-functor-law})} \\
+    =& id
+     & \text{(see \ref{from-rec-f-id})} \\
+  \end{array}
+\end{equation*}
+
+\end{document}
