@@ -5,7 +5,7 @@ module WhatMorphism.TemplateHaskell
 
 
 --------------------------------------------------------------------------------
-import           Control.Monad       (forM, replicateM)
+import           Control.Monad       (forM)
 import           Language.Haskell.TH
 
 
@@ -23,18 +23,26 @@ deriveFold typeName = do
 --------------------------------------------------------------------------------
 mkFold :: Name -> [TyVarBndr] -> [Con] -> Q [Dec]
 mkFold typeName typeBndrs cons = do
+
     a      <- newName "a"  -- Result type of the fold
     consFs <- forM cons $ \c -> do
-        f  <- newName "f"
-        ys <- replicateM (length $ conTypes c) (newName "y")
-        return $ (c, f, ys)
+        f   <- newName "f"
+        tys <- forM (conTypes c) $ \t -> do
+            y  <- newName "y"
+            return (y, t)
+        return $ (c, f, tys)
     x      <- newName "x"  -- Argument we're destroying
 
     return
         [ SigD foldName $ ForallT (typeBndrs ++ [PlainTV a]) [] $
             mkFunTy
-                ([mkFunTy (conTypes con) (VarT a) | con <- cons] ++
-                    [mkAppTy typeName typeBndrs])
+                ([mkFunTy
+                    [ if isRecursive t then (VarT a) else t
+                    | t <- conTypes con
+                    ]
+                    (VarT a)
+                 | con <- cons
+                 ] ++ [typ])
                 (VarT a)
 
         , FunD foldName
@@ -43,8 +51,15 @@ mkFold typeName typeBndrs cons = do
                 (NormalB
                     (CaseE (VarE x)
                         [ Match
-                            (ConP (conName c) (map VarP ys))
-                            (NormalB $ mkAppE (VarE f) ys)
+                            (ConP (conName c) (map VarP $ map fst ys))
+                            (NormalB $ mkAppE (VarE f)
+                                [ if isRecursive t
+                                    then mkAppE (VarE foldName)
+                                            ([VarE f' | (_, f', _) <- consFs] ++
+                                                [VarE y])
+                                    else VarE y
+                                | (y, t) <- ys]
+                                )
                             []
                         | (c, f, ys) <- consFs
                         ]))
@@ -52,7 +67,10 @@ mkFold typeName typeBndrs cons = do
             ]
         ]
   where
+    typ      = mkAppTy typeName typeBndrs
     foldName = mkName $ "fold" ++ nameBase typeName
+
+    isRecursive t = typ == t
 
 
 --------------------------------------------------------------------------------
@@ -63,14 +81,9 @@ mkAppTy name (KindedTV x _ : xs) = AppT (mkAppTy name xs) (VarT x)
 
 
 --------------------------------------------------------------------------------
-mkAppE :: Exp -> [Name] -> Exp
+mkAppE :: Exp -> [Exp] -> Exp
 mkAppE f []       = f
-mkAppE f (a : as) = mkAppE (AppE f (VarE a)) as
-
-
---------------------------------------------------------------------------------
--- mkFunTy :: Type -> Type -> Type
--- mkFunTy x y = (AppT (AppT ArrowT x) y)
+mkAppE f (a : as) = mkAppE (AppE f a) as
 
 
 --------------------------------------------------------------------------------
