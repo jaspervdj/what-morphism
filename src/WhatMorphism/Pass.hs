@@ -8,7 +8,7 @@ module WhatMorphism.Pass
 
 --------------------------------------------------------------------------------
 import           Control.Monad         (foldM, forM, forM_)
-import           Control.Monad.Error   (throwError)
+import           Control.Monad.Error   (catchError, throwError)
 import           CoreMonad
 import           CoreSyn
 import           Data.List             (findIndex)
@@ -48,19 +48,28 @@ whatMorphismPass binds' = do
 --------------------------------------------------------------------------------
 whatMorphism :: CoreBind -> CoreM ()
 whatMorphism bs = do
-    res <- runRewriteM $ do
-        forM_ (fromBinds bs) $ \(f, e) -> do
-            rewrite f e
-
-    _ <- runRewriteM $ case res of
-        Left err -> message $ "Rewrite failed: " ++ err
-        Right _x -> message "OK"
+    forM_ (fromBinds bs) $ \(f, e) -> do
+        res <- runRewriteM $ catchError (rewrite f e) (const $ return NoFold)
+        _   <- runRewriteM $ case res of
+            Left err -> message $ "Error: " ++ err
+            Right x  -> do
+                name <- pretty f
+                message $ "RewriteResult: " ++ name ++ " " ++ show x
+        return ()
 
     return ()
 
 
 --------------------------------------------------------------------------------
-rewrite :: Function Var Var -> Expr Var -> RewriteM ()
+data RewriteResult
+    = NoFold
+    | ListFold
+    | DataFold
+    deriving (Show)
+
+
+--------------------------------------------------------------------------------
+rewrite :: Function Var Var -> Expr Var -> RewriteM RewriteResult
 rewrite func body = do
     let efunc = mapFunction Var func :: Function (Expr Var) (Expr Var)
     (destr, cTyp, alts) <- liftMaybe "topLevelCase" $ topLevelCase body
@@ -92,12 +101,9 @@ rewrite func body = do
 
         return (ac, binds, expr')
 
-    name <- pretty $ functionTerm func
     if (any isListConstructor [ac | (ac, _, _) <- alts'])
-        then message $ "FOLDR " ++ name ++ " (list)"
-        else message $ "FOLDR " ++ name
-
-    return ()
+        then return ListFold
+        else return DataFold
 
 
 --------------------------------------------------------------------------------
