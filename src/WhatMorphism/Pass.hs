@@ -7,7 +7,7 @@ module WhatMorphism.Pass
 
 
 --------------------------------------------------------------------------------
-import           Control.Monad         (foldM, forM, forM_, liftM2, when)
+import           Control.Monad         (foldM, forM, forM_)
 import           Control.Monad.Error   (throwError)
 import           CoreMonad
 import           CoreSyn
@@ -50,22 +50,7 @@ whatMorphism :: CoreBind -> CoreM ()
 whatMorphism bs = do
     res <- runRewriteM $ do
         forM_ (fromBinds bs) $ \(f, e) -> do
-            message ""
-            message $ "Function: " .++. pretty f
-            message $ "Body: " .++. pretty e
             rewrite f e
-            return ()
-
-            message ""
-
-            {-
-            message $ "Destructed: " .++. pretty (destruction bs)
-
-            message ""
-            message "SUBEXPRESSIONS"
-            forM_ (subExprs e) $ message . pretty
-            message ""
-            -}
 
     _ <- runRewriteM $ case res of
         Left err -> message $ "Rewrite failed: " ++ err
@@ -83,7 +68,7 @@ rewrite func body = do
         findIndex (== destr) $ functionArgs func
 
     alts' <- forM alts $ \(ac, bnds, expr) -> do
-        message $ "AltCon: " .++. pretty ac
+        message $ "AltCon: " ++ dump ac
         let step :: Expr Var -> Var -> RewriteM (Expr Var)
             step e b
                 -- The same type should be destroyed in the same way for now
@@ -103,12 +88,14 @@ rewrite func body = do
 
         expr' <- foldM step expr $ reverse bnds
 
-        message $ "Rewritten: " .++. pretty expr'
+        pretty expr' >>= \e -> message $ "Rewritten: " ++ e
 
         return (ac, binds, expr')
 
-    when (any isListConstructor [ac | (ac, _, _) <- alts']) $
-        message "I'm pretty sure this is a foldr!"
+    name <- pretty $ functionTerm func
+    if (any isListConstructor [ac | (ac, _, _) <- alts'])
+        then message $ "FOLDR " ++ name ++ " (list)"
+        else message $ "FOLDR " ++ name
 
     return ()
 
@@ -136,41 +123,12 @@ topLevelCase _                       = Nothing
 
 
 --------------------------------------------------------------------------------
-data Trace = Trace {unTrace :: CoreM String}
+message :: String -> RewriteM ()
+message = liftCoreM . putMsgS
 
 
 --------------------------------------------------------------------------------
-class ToTrace t where
-    toTrace :: t -> Trace
-
-
---------------------------------------------------------------------------------
-instance ToTrace Trace where
-    toTrace = id
-
-
---------------------------------------------------------------------------------
-instance ToTrace String where
-    toTrace = Trace . return
-
-
---------------------------------------------------------------------------------
-instance ToTrace (CoreM String) where
-    toTrace = Trace
-
-
---------------------------------------------------------------------------------
-message :: ToTrace a => a -> RewriteM ()
-message x = liftCoreM $ unTrace (toTrace x) >>= putMsgS
-
-
---------------------------------------------------------------------------------
-(.++.) :: (ToTrace a, ToTrace b) => a -> b -> Trace
-x .++. y = Trace $ liftM2 (++) (unTrace $ toTrace x) (unTrace $ toTrace y)
-
-
---------------------------------------------------------------------------------
-pretty :: Outputable a => a -> CoreM String
+pretty :: Outputable a => a -> RewriteM String
 pretty x = do
-    dflags <- getDynFlags
+    dflags <- liftCoreM getDynFlags
     return $ showSDoc dflags $ ppr x

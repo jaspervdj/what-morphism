@@ -9,6 +9,7 @@ module WhatMorphism.Fold
 
 
 --------------------------------------------------------------------------------
+-- Todo RecF -> Signature
 class Functor (RecF t) => Fold t where
     type RecF t :: * -> *
 
