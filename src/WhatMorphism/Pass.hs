@@ -7,7 +7,7 @@ module WhatMorphism.Pass
 
 
 --------------------------------------------------------------------------------
-import           Control.Monad         (foldM, forM, forM_)
+import           Control.Monad         (foldM, forM_)
 import           Control.Monad.Error   (catchError, throwError)
 import           CoreMonad
 import           CoreSyn
@@ -65,6 +65,7 @@ data RewriteResult
     = NoFold
     | ListFold
     | DataFold
+    | HeadFold
     deriving (Show)
 
 
@@ -76,10 +77,11 @@ rewrite func body = do
     dIdx                <- liftMaybe "findIndex" $
         findIndex (== destr) $ functionArgs func
 
-    alts' <- forM alts $ \(ac, bnds, expr) -> do
+    -- Recs is the number of recursive calls replaced...
+    (alts', recs) <- foldM' alts ([], 0) $ \(as, recs) (ac, bnds, expr) -> do
         message $ "AltCon: " ++ dump ac
-        let step :: Expr Var -> Var -> RewriteM (Expr Var)
-            step e b
+        let step :: (Expr Var, Int) -> Var -> RewriteM (Expr Var, Int)
+            step (e, nr) b
                 -- The same type should be destroyed in the same way for now
                 | Var.varType b `Type.eqType` Var.varType destr = do
                     let needle = replaceArg dIdx (Var b) efunc
@@ -88,22 +90,26 @@ rewrite func body = do
                     if count (Var b) lam > 0
                         then throwError $
                             (dump b) ++ " still appears in body: " ++ dump lam
-                        else return lam
+                        else return (lam, nr + 1)
 
                 -- Otherwise we can just create a lambda expression
                 | otherwise = do
                     lam <- liftCoreM $ mkLambda (Var.varType b) (Var b) e
-                    return lam
+                    return (lam, nr)
 
-        expr' <- foldM step expr $ reverse bnds
+        (expr', recs') <- foldM step (expr, 0) $ reverse bnds
 
         pretty expr' >>= \e -> message $ "Rewritten: " ++ e
 
-        return (ac, binds, expr')
+        return ((ac, binds, expr') : as, recs + recs')
 
-    if (any isListConstructor [ac | (ac, _, _) <- alts'])
-        then return ListFold
-        else return DataFold
+    return $ if recs <= 0
+        then HeadFold
+        else if (any isListConstructor [ac | (ac, _, _) <- alts'])
+            then ListFold
+            else DataFold
+  where
+    foldM' ls x f = foldM f x ls
 
 
 --------------------------------------------------------------------------------
