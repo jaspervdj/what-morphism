@@ -9,21 +9,20 @@ module WhatMorphism.Fold
 
 
 --------------------------------------------------------------------------------
--- Todo RecF -> Signature
-class Functor (RecF t) => Fold t where
-    type RecF t :: * -> *
+class Functor (PF t) => Fold t where
+    type PF t :: * -> *
 
-    toRecF   :: t -> RecF t t
-    fromRecF :: RecF t t -> t
+    toPF   :: t -> PF t t
+    fromPF :: PF t t -> t
 
 
 --------------------------------------------------------------------------------
-type Algebra t a = RecF t a -> a
+type Algebra t a = PF t a -> a
 
 
 --------------------------------------------------------------------------------
 fold :: Fold t => Algebra t a -> t -> a
-fold alg = alg . fmap (fold alg) . toRecF
+fold alg = alg . fmap (fold alg) . toPF
 
 
 --------------------------------------------------------------------------------
@@ -41,13 +40,13 @@ instance Functor (ListF a) where
 
 --------------------------------------------------------------------------------
 instance Fold [a] where
-    type RecF [a] = ListF a
+    type PF [a] = ListF a
 
-    toRecF []       = NilF
-    toRecF (x : xs) = ConsF x xs
+    toPF []       = NilF
+    toPF (x : xs) = ConsF x xs
 
-    fromRecF NilF         = []
-    fromRecF (ConsF x xs) = x : xs
+    fromPF NilF         = []
+    fromPF (ConsF x xs) = x : xs
 
 
 --------------------------------------------------------------------------------
@@ -83,13 +82,13 @@ instance Functor (TreeF a) where
 
 --------------------------------------------------------------------------------
 instance Fold (Tree a) where
-    type RecF (Tree a) = TreeF a
+    type PF (Tree a) = TreeF a
 
-    toRecF Empty          = EmptyF
-    toRecF (Branch x l r) = BranchF x l r
+    toPF Empty          = EmptyF
+    toPF (Branch x l r) = BranchF x l r
 
-    fromRecF EmptyF          = Empty
-    fromRecF (BranchF x l r) = Branch x l r
+    fromPF EmptyF          = Empty
+    fromPF (BranchF x l r) = Branch x l r
 
 
 --------------------------------------------------------------------------------
