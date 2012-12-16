@@ -53,7 +53,7 @@ whatMorphism bs = do
         _   <- runRewriteM $ case res of
             Left err -> message $ "Error: " ++ err
             Right x  -> do
-                name <- pretty f
+                name <- pretty (functionTerm f)
                 message $ "RewriteResult: " ++ name ++ " " ++ show x
         return ()
 
