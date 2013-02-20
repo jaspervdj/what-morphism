@@ -2,6 +2,7 @@
 -- | Utilities for manipulating expressions
 module WhatMorphism.Expr
     ( subExprs
+    , subExprsInBranch
     , everywhere
     , count
     , replace
@@ -46,6 +47,22 @@ subExprs x = x : go x
     go (Tick _ e)      = subExprs e
     go (Type _)        = []
     go (Coercion _)    = []
+
+
+--------------------------------------------------------------------------------
+subExprsInBranch :: Expr b -> [Expr b]
+subExprsInBranch x = x : go x
+  where
+    go (Var _)          = []
+    go (Lit _)          = []
+    go (App f a)        = subExprs f ++ subExprs a
+    go (Lam _ e)        = subExprs e
+    go (Let b e)        = concatMap subExprs (map snd $ binds b) ++ subExprs e
+    go (Case e _ _ _as) = subExprs e
+    go (Cast e _)       = subExprs e
+    go (Tick _ e)       = subExprs e
+    go (Type _)         = []
+    go (Coercion _)     = []
 
 
 --------------------------------------------------------------------------------
