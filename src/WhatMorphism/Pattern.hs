@@ -8,6 +8,7 @@ module WhatMorphism.Pattern
 import           Control.Applicative   ((<|>))
 import           Control.Monad         (forM_)
 import           CoreSyn
+import           Data.List             (find)
 import           Type                  (Type)
 import qualified Type                  as Type
 import           Var                   (Var)
@@ -47,6 +48,7 @@ toFoldOver f d c@(Case (Var x) _ rTyp alts)
             message $ "Was: " ++ dump expr
             expr' <- rewriteAlt f d bnds rTyp expr
             message $ "Now: " ++ dump expr'
+            assertWellScoped (d : bnds) expr'
         return c
     | otherwise                        = fail "Wrong argument destructed"
 toFoldOver _ _ _                       = fail "No top-level Case"
@@ -67,3 +69,18 @@ rewriteAlt f d (t : ts) rTyp body = do
         else liftCoreM $ mkLambda (Var.varType t) (Var t) expr
   where
     isRecursive = Var.varType t `Type.eqType` Var.varType d
+
+
+--------------------------------------------------------------------------------
+-- | We don't actually do any scoping, we just have a list of vars which can't
+-- appear anymore.
+assertWellScoped :: [Var] -> Expr Var -> RewriteM ()
+assertWellScoped vars body = case find (`inScope` body) vars of
+    Nothing  -> message "Scope okay"
+    Just var -> fail $
+        "Not well-scoped: " ++ dump var ++ " still appears after rewriting"
+
+
+--------------------------------------------------------------------------------
+inScope :: Var -> Expr Var -> Bool
+inScope x body = count (Var x) body > 0

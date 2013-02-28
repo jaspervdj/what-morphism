@@ -75,7 +75,9 @@ instance Applicative RewriteM where
 --------------------------------------------------------------------------------
 instance Alternative RewriteM where
     empty   = throwError "WhatMorphism.RewriteM.RewriteM: empty Alternative"
-    x <|> y = catchError x (\_ -> y)
+    x <|> y = catchError x $ \err -> do
+        message $ "WhatMorphism.RewriteM.RewriteM: <|> branch failed: " ++ err
+        y
 
 
 --------------------------------------------------------------------------------
