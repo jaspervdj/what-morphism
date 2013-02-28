@@ -39,7 +39,10 @@ instance Dump a => Dump [a] where
 
 --------------------------------------------------------------------------------
 instance Dump Var where
-    dump = OccName.occNameString . Name.getOccName . Var.varName
+    dump var =
+        let name = Var.varName var
+        in OccName.occNameString (Name.getOccName name) ++ "_" ++
+            show (Name.nameUnique name)
 
 
 --------------------------------------------------------------------------------

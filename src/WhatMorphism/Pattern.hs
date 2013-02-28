@@ -23,7 +23,9 @@ import           WhatMorphism.RewriteM
 
 --------------------------------------------------------------------------------
 toFold :: Var -> Expr Var -> RewriteM (Expr Var)
-toFold f body = toFold' (Var f) body
+toFold f body = do
+    message $ "Starting with: " ++ dump body
+    toFold' (Var f) body
 
 
 --------------------------------------------------------------------------------
@@ -48,7 +50,7 @@ toFoldOver f d c@(Case (Var x) _ rTyp alts)
             message $ "Was: " ++ dump expr
             expr' <- rewriteAlt f d bnds rTyp expr
             message $ "Now: " ++ dump expr'
-            assertWellScoped (d : bnds) expr'
+            assertWellScoped (x : bnds) expr'
         return c
     | otherwise                        = fail "Wrong argument destructed"
 toFoldOver _ _ _                       = fail "No top-level Case"

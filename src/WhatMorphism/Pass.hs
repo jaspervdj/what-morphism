@@ -59,6 +59,7 @@ whatMorphism bs = do
 
     forM_ (fromBinds bs) $ \(f, e) -> do
 
+        _   <- runRewriteM $ pretty e >>= \e' -> message $ "Body: " ++ e'
         res <- runRewriteM $ catchError (rewrite f e) (const $ return NoFold)
         _   <- runRewriteM $ case res of
             Left err -> message $ "Error: " ++ err

@@ -148,7 +148,7 @@ class SynEq a where
 --------------------------------------------------------------------------------
 instance SynEq Var where
     x .==. y =
-        Name.getOccName (Var.varName x) == Name.getOccName (Var.varName y)
+        Name.nameUnique (Var.varName x) == Name.nameUnique (Var.varName y)
 
 
 --------------------------------------------------------------------------------
