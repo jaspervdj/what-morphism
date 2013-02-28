@@ -8,12 +8,15 @@ module WhatMorphism.RewriteM
     , liftCoreM
     , liftMaybe
     , liftMaybe'
+    , message
     ) where
 
 
 --------------------------------------------------------------------------------
+import           Control.Applicative (Alternative (..), Applicative (..))
+import           Control.Monad       (ap)
 import           Control.Monad.Error (MonadError (..))
-import           CoreMonad           (CoreM)
+import           CoreMonad           (CoreM, putMsgS)
 import           UniqSupply          (MonadUnique (..))
 import qualified UniqSupply          as Unique
 
@@ -44,6 +47,8 @@ instance Monad RewriteM where
                     Right y' -> return $ Right y'
     {-# INLINE (>>=) #-}
 
+    fail err = RewriteM $ return $ Left err
+
 
 --------------------------------------------------------------------------------
 instance Unique.MonadUnique RewriteM where
@@ -52,12 +57,25 @@ instance Unique.MonadUnique RewriteM where
 
 --------------------------------------------------------------------------------
 instance MonadError String RewriteM where
-    throwError err             = RewriteM $ return $ Left err
+    throwError err             = fail err
     catchError (RewriteM mx) f = RewriteM $ do
         x <- mx
         case x of
             Left e   -> unRewriteM $ f e
             Right x' -> return $ Right x'
+
+
+--------------------------------------------------------------------------------
+-- | Implemented in terms of the monad interface since I'm lazy
+instance Applicative RewriteM where
+    pure  = return
+    (<*>) = ap
+
+
+--------------------------------------------------------------------------------
+instance Alternative RewriteM where
+    empty   = throwError "WhatMorphism.RewriteM.RewriteM: empty Alternative"
+    x <|> y = catchError x (\_ -> y)
 
 
 --------------------------------------------------------------------------------
@@ -79,3 +97,8 @@ liftMaybe err m = RewriteM $ return $ maybe (Left err) Right m
 --------------------------------------------------------------------------------
 liftMaybe' :: Maybe a -> RewriteM a
 liftMaybe' = liftMaybe "WhatMorphism.RewriteM.liftMaybe'"
+
+
+--------------------------------------------------------------------------------
+message :: String -> RewriteM ()
+message = liftCoreM . putMsgS

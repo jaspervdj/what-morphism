@@ -24,6 +24,7 @@ import           Var
 import           WhatMorphism.Dump
 import           WhatMorphism.Expr
 import           WhatMorphism.Function
+import           WhatMorphism.Pattern
 import           WhatMorphism.RewriteM
 
 
@@ -48,7 +49,16 @@ whatMorphismPass binds' = do
 --------------------------------------------------------------------------------
 whatMorphism :: CoreBind -> CoreM ()
 whatMorphism bs = do
+    forM_ (binds bs) $ \(f, e) -> do
+        _   <- runRewriteM $ message $ "====== New-style approach: " ++ dump f
+        res <- runRewriteM $ toFold f e
+        _   <- runRewriteM $ case res of
+            Left err -> message $ "====== Error: " ++ err
+            Right x  -> message $ "====== Ok: "    ++ dump x
+        return ()
+
     forM_ (fromBinds bs) $ \(f, e) -> do
+
         res <- runRewriteM $ catchError (rewrite f e) (const $ return NoFold)
         _   <- runRewriteM $ case res of
             Left err -> message $ "Error: " ++ err
@@ -132,11 +142,6 @@ isListConstructor ac = fromMaybe False $ do
 topLevelCase :: Expr Var -> Maybe (Var, Type, [Alt Var])
 topLevelCase (Case (Var b) _ t alts) = Just (b, t, alts)
 topLevelCase _                       = Nothing
-
-
---------------------------------------------------------------------------------
-message :: String -> RewriteM ()
-message = liftCoreM . putMsgS
 
 
 --------------------------------------------------------------------------------
