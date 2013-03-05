@@ -40,10 +40,12 @@ whatMorphismPass = mapM whatMorphism
 --------------------------------------------------------------------------------
 whatMorphism :: CoreBind -> CoreM CoreBind
 whatMorphism coreBind = do
+    {-
     name <- runRewriteM $ findName "Data.List" "intercalate"
     CoreM.putMsgS $ case name of
         Left err -> err
         Right x  -> dump x
+    -}
 
     coreBind' <- withBinds coreBind $ \f e -> do
         _   <- runRewriteM $ message $ "====== New-style approach: " ++ dump f
@@ -55,6 +57,7 @@ whatMorphism coreBind = do
             Left  _  -> e
             Right e' -> e'
 
+    {-
     forM_ (fromBinds coreBind) $ \(f, e) -> do
 
         _   <- runRewriteM $ pretty e >>= \e' -> message $ "Body: " ++ e'
@@ -65,6 +68,7 @@ whatMorphism coreBind = do
                 name' <- pretty (functionTerm f)
                 message $ "RewriteResult: " ++ name' ++ " " ++ show x
         return ()
+    -}
 
     return coreBind'
 
