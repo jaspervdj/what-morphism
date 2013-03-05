@@ -6,12 +6,10 @@ module WhatMorphism.Pattern
 
 --------------------------------------------------------------------------------
 import           Control.Applicative   ((<|>))
-import           Control.Monad         (forM, forM_)
+import           Control.Monad         (forM)
 import           CoreSyn
 import           Data.List             (find)
-import           Data.Maybe            (fromMaybe)
 import qualified MkCore                as MkCore
-import qualified Name                  as Name
 import           Type                  (Type)
 import qualified Type                  as Type
 import qualified TysWiredIn            as TysWiredIn
@@ -51,7 +49,7 @@ toFoldOver :: (Var -> Expr Var)
            -> RewriteM (Expr Var)
 toFoldOver f mkF d (Lam x body) =
     toFoldOver (\t -> App (f t) (Var x)) (\e -> mkF (Lam x e)) d body
-toFoldOver f mkF d c@(Case (Var x) _ rTyp alts)
+toFoldOver f mkF d (Case (Var x) _ rTyp alts)
     | x == d                    = do
         alts' <- forM alts $ \(ac, bnds, expr) -> do
             message $ "Rewriting AltCon " ++ dump ac
@@ -86,16 +84,6 @@ mkListFold d rTyp alts = do
 
     getAlt dataCon = liftMaybe ("No alt found for " ++ dump dataCon) $
         lookup (DataAlt dataCon) alts
-
-
---------------------------------------------------------------------------------
-isListConstructor :: AltCon -> Bool
-isListConstructor ac = fromMaybe False $ do
-    dc <- dataAlt ac
-    return $ Name.occNameString (Name.getOccName dc) `elem` [":", "[]"]
-  where
-    dataAlt (DataAlt c) = Just c
-    dataAlt _           = Nothing
 
 
 --------------------------------------------------------------------------------

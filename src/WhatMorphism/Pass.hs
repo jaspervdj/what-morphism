@@ -12,10 +12,8 @@ import           Control.Monad.Error   (catchError, throwError)
 import           CoreMonad             (CoreM)
 import qualified CoreMonad             as CoreM
 import           CoreSyn
-import           Data.IORef            (readIORef)
 import           Data.List             (findIndex)
 import           Data.Maybe            (fromMaybe, listToMaybe)
-import qualified HscTypes              as HscTypes
 import qualified Module                as Module
 import           Name                  (Name)
 import qualified Name                  as Name
@@ -36,50 +34,39 @@ import           WhatMorphism.RewriteM
 
 --------------------------------------------------------------------------------
 whatMorphismPass :: [CoreBind] -> CoreM [CoreBind]
-whatMorphismPass binds' = do
-    mapM_ whatMorphism binds'
-    return binds'
+whatMorphismPass = mapM whatMorphism
 
 
 --------------------------------------------------------------------------------
--- 1. Descend into the bind, which should be a lambda. We need to figure out it
--- arguments, one of these might be 'destructed'.
---
--- 2. If in the body of the lambda we find a case statement which destructs any
--- of these arguments, we have a good hint.
---
--- 3. In this destruction we get a number of binds. Recursive calls can only be
--- made on these binds.
-
-
---------------------------------------------------------------------------------
-whatMorphism :: CoreBind -> CoreM ()
-whatMorphism bs = do
+whatMorphism :: CoreBind -> CoreM CoreBind
+whatMorphism coreBind = do
     name <- runRewriteM $ findName "Data.List" "intercalate"
     CoreM.putMsgS $ case name of
         Left err -> err
         Right x  -> dump x
 
-    forM_ (binds bs) $ \(f, e) -> do
+    coreBind' <- withBinds coreBind $ \f e -> do
         _   <- runRewriteM $ message $ "====== New-style approach: " ++ dump f
         res <- runRewriteM $ toFold f e
         _   <- runRewriteM $ case res of
             Left err -> message $ "====== Error: " ++ err
-            Right x  -> message $ "====== Ok: "    ++ dump x
-        return ()
+            Right e' -> message $ "====== Ok: "    ++ dump e'
+        return $ case res of
+            Left  _  -> e
+            Right e' -> e'
 
-    forM_ (fromBinds bs) $ \(f, e) -> do
+    forM_ (fromBinds coreBind) $ \(f, e) -> do
 
         _   <- runRewriteM $ pretty e >>= \e' -> message $ "Body: " ++ e'
         res <- runRewriteM $ catchError (rewrite f e) (const $ return NoFold)
         _   <- runRewriteM $ case res of
             Left err -> message $ "Error: " ++ err
             Right x  -> do
-                name <- pretty (functionTerm f)
-                message $ "RewriteResult: " ++ name ++ " " ++ show x
+                name' <- pretty (functionTerm f)
+                message $ "RewriteResult: " ++ name' ++ " " ++ show x
         return ()
 
-    return ()
+    return coreBind'
 
 
 --------------------------------------------------------------------------------

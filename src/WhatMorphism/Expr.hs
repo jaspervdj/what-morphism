@@ -9,12 +9,14 @@ module WhatMorphism.Expr
     , toVar
     , mkLambda
     , binds
+    , withBinds
     , foldExpr
     ) where
 
 
 --------------------------------------------------------------------------------
 import           Coercion                   (Coercion)
+import           Control.Monad              (forM, liftM)
 import           Control.Monad.State.Strict (State, modify, runState)
 import           CoreMonad                  (CoreM)
 import           CoreSyn
@@ -95,6 +97,14 @@ replace f = flip runState 0 . state
 binds :: Bind b -> [(b, Expr b)]
 binds (NonRec b e) = [(b, e)]
 binds (Rec bs)     = bs
+
+
+--------------------------------------------------------------------------------
+withBinds :: Monad m => Bind b -> (b -> Expr b -> m (Expr b)) -> m (Bind b)
+withBinds (NonRec b e) f = liftM (NonRec b) $ f b e
+withBinds (Rec bs)     f = liftM Rec $ forM bs $ \(b, e) -> do
+    e' <- f b e
+    return (b, e')
 
 
 --------------------------------------------------------------------------------
