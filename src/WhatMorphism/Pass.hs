@@ -9,11 +9,17 @@ module WhatMorphism.Pass
 --------------------------------------------------------------------------------
 import           Control.Monad         (foldM, forM_)
 import           Control.Monad.Error   (catchError, throwError)
-import           CoreMonad
+import           CoreMonad             (CoreM)
+import qualified CoreMonad             as CoreM
 import           CoreSyn
+import           Data.IORef            (readIORef)
 import           Data.List             (findIndex)
-import           Data.Maybe            (fromMaybe)
+import           Data.Maybe            (fromMaybe, listToMaybe)
+import qualified HscTypes              as HscTypes
+import qualified Module                as Module
+import           Name                  (Name)
 import qualified Name                  as Name
+import qualified OccName               as OccName
 import           Outputable
 import           Type                  (Type)
 import qualified Type                  as Type
@@ -49,6 +55,11 @@ whatMorphismPass binds' = do
 --------------------------------------------------------------------------------
 whatMorphism :: CoreBind -> CoreM ()
 whatMorphism bs = do
+    name <- runRewriteM $ findName "Data.List" "intercalate"
+    CoreM.putMsgS $ case name of
+        Left err -> err
+        Right x  -> dump x
+
     forM_ (binds bs) $ \(f, e) -> do
         _   <- runRewriteM $ message $ "====== New-style approach: " ++ dump f
         res <- runRewriteM $ toFold f e
@@ -148,5 +159,24 @@ topLevelCase _                       = Nothing
 --------------------------------------------------------------------------------
 pretty :: Outputable a => a -> RewriteM String
 pretty x = do
-    dflags <- liftCoreM getDynFlags
+    dflags <- liftCoreM CoreM.getDynFlags
     return $ showSDoc dflags $ ppr x
+
+
+--------------------------------------------------------------------------------
+findName :: String -> String -> RewriteM Name
+findName moduleName name = do
+    origNameCache <- liftCoreM $ CoreM.getOrigNameCache
+    occEnv        <- liftMaybe ("Module not found: " ++ moduleName) $
+        lookupByModuleName moduleName origNameCache
+    liftMaybe ("Symbol not found: " ++ name) $
+        OccName.lookupOccEnv occEnv (OccName.mkVarOcc name)
+
+
+--------------------------------------------------------------------------------
+lookupByModuleName :: String -> Module.ModuleEnv a -> Maybe a
+lookupByModuleName name env = listToMaybe
+    [ x
+    | (m, x) <- Module.moduleEnvToList env
+    , Module.moduleNameString (Module.moduleName m) == name
+    ]

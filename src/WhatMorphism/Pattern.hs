@@ -6,11 +6,15 @@ module WhatMorphism.Pattern
 
 --------------------------------------------------------------------------------
 import           Control.Applicative   ((<|>))
-import           Control.Monad         (forM_)
+import           Control.Monad         (forM, forM_)
 import           CoreSyn
 import           Data.List             (find)
+import           Data.Maybe            (fromMaybe)
+import qualified MkCore                as MkCore
+import qualified Name                  as Name
 import           Type                  (Type)
 import qualified Type                  as Type
+import qualified TysWiredIn            as TysWiredIn
 import           Var                   (Var)
 import qualified Var                   as Var
 
@@ -25,35 +29,73 @@ import           WhatMorphism.RewriteM
 toFold :: Var -> Expr Var -> RewriteM (Expr Var)
 toFold f body = do
     message $ "Starting with: " ++ dump body
-    toFold' (Var f) body
+    toFold' (Var f) id body
 
 
 --------------------------------------------------------------------------------
-toFold' :: Expr Var -> Expr Var -> RewriteM (Expr Var)
-toFold' f (Lam x body) =
-    toFoldOver (\t -> App f (Var t)) x body <|>
-    toFold' (App f (Var x)) body
-toFold' _ _            = fail "No top-level Lam"
+toFold' :: Expr Var
+        -> (Expr Var -> Expr Var)
+        -> Expr Var
+        -> RewriteM (Expr Var)
+toFold' f mkF (Lam x body) =
+    toFoldOver (\t -> App f (Var t)) (\e -> mkF (Lam x e)) x body <|>
+    toFold' (App f (Var x)) (\e -> Lam x (mkF e)) body
+toFold' _ _   _            = fail "No top-level Lam"
 
 
 --------------------------------------------------------------------------------
 toFoldOver :: (Var -> Expr Var)
+           -> (Expr Var -> Expr Var)
            -> Var
            -> Expr Var
            -> RewriteM (Expr Var)
-toFoldOver f d (Lam x body)            =
-    toFoldOver (\t -> App (f t) (Var x)) d body
-toFoldOver f d c@(Case (Var x) _ rTyp alts)
-    | x == d                           = do
-        forM_ alts $ \(ac, bnds, expr) -> do
+toFoldOver f mkF d (Lam x body) =
+    toFoldOver (\t -> App (f t) (Var x)) (\e -> mkF (Lam x e)) d body
+toFoldOver f mkF d c@(Case (Var x) _ rTyp alts)
+    | x == d                    = do
+        alts' <- forM alts $ \(ac, bnds, expr) -> do
             message $ "Rewriting AltCon " ++ dump ac
             message $ "Was: " ++ dump expr
             expr' <- rewriteAlt f d bnds rTyp expr
             message $ "Now: " ++ dump expr'
             assertWellScoped (x : bnds) expr'
-        return c
-    | otherwise                        = fail "Wrong argument destructed"
-toFoldOver _ _ _                       = fail "No top-level Case"
+            return (ac, expr')
+        fold <- mkListFold d rTyp alts'
+        return $ mkF fold
+    | otherwise                 = fail "Wrong argument destructed"
+toFoldOver _ _ _ _              = fail "No top-level Case"
+
+
+--------------------------------------------------------------------------------
+mkListFold :: Var
+           -> Type
+           -> [(AltCon, Expr Var)]
+           -> RewriteM (Expr Var)
+mkListFold d rTyp alts = do
+    elemTyp <- getElemTyp
+    consF   <- getAlt TysWiredIn.consDataCon
+    nilF    <- getAlt TysWiredIn.nilDataCon
+    liftCoreM $ MkCore.mkFoldrExpr elemTyp rTyp consF nilF (Var d)
+  where
+    getElemTyp = case Type.splitTyConApp_maybe (Var.varType d) of
+        Nothing                            -> fail "Not working on a TyConApp"
+        Just (tcon, [elemTyp])
+            | tcon == TysWiredIn.listTyCon -> return elemTyp
+            | otherwise                    -> fail "Not working on listTyCon"
+        Just _                             -> fail "Weird listTyCon?!"
+
+    getAlt dataCon = liftMaybe ("No alt found for " ++ dump dataCon) $
+        lookup (DataAlt dataCon) alts
+
+
+--------------------------------------------------------------------------------
+isListConstructor :: AltCon -> Bool
+isListConstructor ac = fromMaybe False $ do
+    dc <- dataAlt ac
+    return $ Name.occNameString (Name.getOccName dc) `elem` [":", "[]"]
+  where
+    dataAlt (DataAlt c) = Just c
+    dataAlt _           = Nothing
 
 
 --------------------------------------------------------------------------------

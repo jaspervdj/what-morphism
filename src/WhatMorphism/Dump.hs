@@ -10,6 +10,7 @@ import           CoreSyn
 import           Data.List (intercalate)
 import           DataCon   (DataCon)
 import           Literal   (Literal)
+import           Name      (Name)
 import qualified Name      as Name
 import qualified OccName   as OccName
 import           TypeRep   (Type)
@@ -38,11 +39,14 @@ instance Dump a => Dump [a] where
 
 
 --------------------------------------------------------------------------------
+instance Dump Name where
+    dump name = OccName.occNameString (Name.getOccName name) ++ "_" ++
+        show (Name.nameUnique name)
+
+
+--------------------------------------------------------------------------------
 instance Dump Var where
-    dump var =
-        let name = Var.varName var
-        in OccName.occNameString (Name.getOccName name) ++ "_" ++
-            show (Name.nameUnique name)
+    dump = dump . Var.varName
 
 
 --------------------------------------------------------------------------------
