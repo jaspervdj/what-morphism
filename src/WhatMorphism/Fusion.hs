@@ -1,4 +1,5 @@
 --------------------------------------------------------------------------------
+{-# LANGUAGE ScopedTypeVariables #-}
 module WhatMorphism.Fusion
     ( foldFoldFusion
     , isListFold
@@ -6,6 +7,9 @@ module WhatMorphism.Fusion
 
 
 --------------------------------------------------------------------------------
+import           Control.Applicative   ((<$>), (<*>))
+import           Control.Monad.State   (StateT, evalStateT)
+import           Control.Monad.Trans   (lift)
 import           CoreSyn
 import qualified PrelNames             as PrelNames
 import           Type                  (Type)
@@ -15,6 +19,7 @@ import qualified Var                   as Var
 
 --------------------------------------------------------------------------------
 import           WhatMorphism.Dump
+import           WhatMorphism.Expr
 import           WhatMorphism.RewriteM
 import           WhatMorphism.SynEq
 
@@ -64,3 +69,24 @@ isListFold (App (App (App (App (App (Var foldrVar) _) rTyp) cons) nilF) d)
     fromType _        = Nothing
 
 isListFold _                                      = Nothing
+
+
+--------------------------------------------------------------------------------
+rewriteBranch :: forall s.
+                 s                                           -- ^ Initial state
+              -> (Expr Var -> StateT s RewriteM (Expr Var))  -- ^ Rewrite
+              -> Expr Var                                    -- ^ Input
+              -> RewriteM (Expr Var)                         -- ^ Result
+rewriteBranch initial f expr = evalStateT (go expr) initial
+  where
+    -- Rewrite with a resetted state
+    local :: Expr Var -> StateT s RewriteM (Expr Var)
+    local x = lift $ evalStateT (go x) initial
+
+    -- Note how we use local for Lam and Case
+    go :: Expr Var -> StateT s RewriteM (Expr Var)
+    go (Var x)   = f (Var x)
+    go (Lit x)   = f (Lit x)
+    go (App x y) = f =<< App <$> go x <*> go y
+    go (Lam x y) = f =<< Lam x <$> local y
+    go (Let x y) = f =<< Let <$> withBinds x (\_ e -> f e) <*> go y
