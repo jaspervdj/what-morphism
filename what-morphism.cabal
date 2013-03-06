@@ -21,6 +21,7 @@ Library
     WhatMorphism.Dump
     WhatMorphism.Expr
     WhatMorphism.Function
+    WhatMorphism.Fusion
     WhatMorphism.Pass
     WhatMorphism.Pattern
     WhatMorphism.RewriteM

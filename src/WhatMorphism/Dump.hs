@@ -39,6 +39,12 @@ instance Dump a => Dump [a] where
 
 
 --------------------------------------------------------------------------------
+instance Dump a => Dump (Maybe a) where
+    dump Nothing  = "Nothing"
+    dump (Just x) = "(Just " ++ dump x ++ ")"
+
+
+--------------------------------------------------------------------------------
 instance Dump Name where
     dump name = OccName.occNameString (Name.getOccName name) ++ "_" ++
         show (Name.nameUnique name)

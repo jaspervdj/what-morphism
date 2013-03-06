@@ -1,0 +1,56 @@
+--------------------------------------------------------------------------------
+module WhatMorphism.Fusion
+    ( foldFoldFusion
+    , isListFold
+    ) where
+
+
+--------------------------------------------------------------------------------
+import           CoreSyn
+import qualified PrelNames             as PrelNames
+import           Type                  (Type)
+import           Var                   (Var)
+import qualified Var                   as Var
+
+
+--------------------------------------------------------------------------------
+import           WhatMorphism.Dump
+import           WhatMorphism.RewriteM
+
+
+--------------------------------------------------------------------------------
+foldFoldFusion :: Expr Var -> RewriteM (Expr Var)
+foldFoldFusion = undefined
+
+
+--------------------------------------------------------------------------------
+data FoldSpec = FoldSpec
+    { foldReturnType :: Type
+    , foldAlgebra    :: [Expr Var]
+    , foldDestroys   :: Expr Var
+    }
+
+
+--------------------------------------------------------------------------------
+instance Dump FoldSpec where
+    dump (FoldSpec r a d) =
+        "(FoldSpec " ++ dump r ++ " " ++ dump a ++ " " ++ dump d ++ ")"
+
+
+--------------------------------------------------------------------------------
+isListFold :: Expr Var -> Maybe FoldSpec
+
+isListFold (App (App (App (App (App (Var foldrVar) _) rTyp) cons) nilF) d)
+    | Var.varName foldrVar /= PrelNames.foldrName = Nothing
+    | otherwise                                   = do
+        rTyp' <- fromType rTyp
+        return FoldSpec
+            { foldReturnType = rTyp'
+            , foldAlgebra    = [cons, nilF]
+            , foldDestroys   = d
+            }
+  where
+    fromType (Type t) = Just t
+    fromType _        = Nothing
+
+isListFold _                                      = Nothing
