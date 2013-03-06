@@ -25,7 +25,8 @@ foldFoldFusion = undefined
 
 --------------------------------------------------------------------------------
 data FoldSpec = FoldSpec
-    { foldReturnType :: Type
+    { foldFunction   :: Var
+    , foldReturnType :: Type
     , foldAlgebra    :: [Expr Var]
     , foldDestroys   :: Expr Var
     }
@@ -33,8 +34,8 @@ data FoldSpec = FoldSpec
 
 --------------------------------------------------------------------------------
 instance Dump FoldSpec where
-    dump (FoldSpec r a d) =
-        "(FoldSpec " ++ dump r ++ " " ++ dump a ++ " " ++ dump d ++ ")"
+    dump (FoldSpec f r a d) =
+        "(FoldSpec " ++ unwords [dump f, dump r, dump a, dump d] ++ ")"
 
 
 --------------------------------------------------------------------------------
@@ -45,7 +46,8 @@ isListFold (App (App (App (App (App (Var foldrVar) _) rTyp) cons) nilF) d)
     | otherwise                                   = do
         rTyp' <- fromType rTyp
         return FoldSpec
-            { foldReturnType = rTyp'
+            { foldFunction   = foldrVar
+            , foldReturnType = rTyp'
             , foldAlgebra    = [cons, nilF]
             , foldDestroys   = d
             }
