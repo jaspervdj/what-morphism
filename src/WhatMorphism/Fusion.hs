@@ -7,7 +7,8 @@ module WhatMorphism.Fusion
 
 
 --------------------------------------------------------------------------------
-import           Control.Applicative   ((<$>), (<*>))
+import           Control.Applicative   (pure, (<$>), (<*>))
+import           Control.Monad         (mapM)
 import           Control.Monad.State   (StateT, evalStateT)
 import           Control.Monad.Trans   (lift)
 import           CoreSyn
@@ -85,8 +86,20 @@ rewriteBranch initial f expr = evalStateT (go expr) initial
 
     -- Note how we use local for Lam and Case
     go :: Expr Var -> StateT s RewriteM (Expr Var)
-    go (Var x)   = f (Var x)
-    go (Lit x)   = f (Lit x)
-    go (App x y) = f =<< App <$> go x <*> go y
-    go (Lam x y) = f =<< Lam x <$> local y
-    go (Let x y) = f =<< Let <$> withBinds x (\_ e -> f e) <*> go y
+    go (Var x)           = f (Var x)
+    go (Lit x)           = f (Lit x)
+    go (App x y)         = f =<< App <$> go x <*> go y
+    go (Lam x y)         = f =<< Lam x <$> local y
+    go (Let x y)         = f =<< Let <$> withBinds x (\_ e -> f e) <*> go y
+    go (Case x y t alts) = f =<<
+        Case <$> go x <*> pure y <*> pure t <*> mapM goAlt alts
+    go (Cast x c)        = f =<< Cast <$> go x <*> pure c
+    go (Tick t y)        = f =<< Tick <$> pure t <*> go y
+    go (Type t)          = f (Type t)
+    go (Coercion c)      = f (Coercion c)
+
+    -- This is always local
+    goAlt :: Alt Var -> StateT s RewriteM (Alt Var)
+    goAlt (ac, bs, expr) = do
+        expr' <- local expr
+        return (ac, bs, expr')
