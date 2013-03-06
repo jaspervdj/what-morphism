@@ -16,6 +16,7 @@ import qualified Var                   as Var
 --------------------------------------------------------------------------------
 import           WhatMorphism.Dump
 import           WhatMorphism.RewriteM
+import           WhatMorphism.SynEq
 
 
 --------------------------------------------------------------------------------
@@ -36,6 +37,13 @@ data FoldSpec = FoldSpec
 instance Dump FoldSpec where
     dump (FoldSpec f r a d) =
         "(FoldSpec " ++ unwords [dump f, dump r, dump a, dump d] ++ ")"
+
+
+--------------------------------------------------------------------------------
+isFusable :: FoldSpec -> FoldSpec -> Bool
+isFusable fs1 fs2 =
+    foldFunction fs1 .==. foldFunction fs2 &&
+    foldDestroys fs1 .==. foldDestroys fs2
 
 
 --------------------------------------------------------------------------------
