@@ -20,7 +20,6 @@ import qualified Var                   as Var
 --------------------------------------------------------------------------------
 import           WhatMorphism.Dump
 import           WhatMorphism.Expr
-import           WhatMorphism.Fusion
 import           WhatMorphism.RewriteM
 
 
@@ -60,7 +59,6 @@ toFoldOver f mkF d (Case (Var x) _ rTyp alts)
             assertWellScoped (x : bnds) expr'
             return (ac, expr')
         fold <- mkListFold d rTyp alts'
-        message $ "isListFold: " ++ dump (isListFold fold)
         return $ mkF fold
     | otherwise                 = fail "Wrong argument destructed"
 toFoldOver _ _ _ _              = fail "No top-level Case"

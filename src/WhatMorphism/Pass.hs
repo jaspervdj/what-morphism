@@ -28,6 +28,7 @@ import           Var
 import           WhatMorphism.Dump
 import           WhatMorphism.Expr
 import           WhatMorphism.Function
+import           WhatMorphism.Fusion
 import           WhatMorphism.Pattern
 import           WhatMorphism.RewriteM
 
@@ -57,6 +58,16 @@ whatMorphism coreBind = do
             Left  _  -> e
             Right e' -> e'
 
+    coreBind'' <- withBinds coreBind' $ \f e -> do
+        _   <- runRewriteM $ message $ "====== foldFoldFusion " ++ dump f
+        res <- runRewriteM $ foldFoldFusion e
+        _   <- runRewriteM $ case res of
+            Left err -> message $ "====== Error: " ++ err
+            Right e' -> message $ "====== Ok: "    ++ dump e'
+        return $ case res of
+            Left  _  -> e
+            Right e' -> e'
+
     {-
     forM_ (fromBinds coreBind) $ \(f, e) -> do
 
@@ -70,7 +81,7 @@ whatMorphism coreBind = do
         return ()
     -}
 
-    return coreBind'
+    return coreBind''
 
 
 --------------------------------------------------------------------------------

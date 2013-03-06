@@ -2,16 +2,16 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module WhatMorphism.Fusion
     ( foldFoldFusion
-    , isListFold
+    , listFoldSpec
     ) where
 
 
 --------------------------------------------------------------------------------
 import           Control.Applicative   (pure, (<$>), (<*>))
-import           Control.Monad         (mapM)
-import           Control.Monad.State   (StateT, evalStateT)
+import           Control.Monad.State   (StateT, evalStateT, get, modify)
 import           Control.Monad.Trans   (lift)
 import           CoreSyn
+import           Data.Maybe            (maybeToList)
 import qualified PrelNames             as PrelNames
 import           Type                  (Type)
 import           Var                   (Var)
@@ -27,7 +27,14 @@ import           WhatMorphism.SynEq
 
 --------------------------------------------------------------------------------
 foldFoldFusion :: Expr Var -> RewriteM (Expr Var)
-foldFoldFusion = undefined
+foldFoldFusion = rewriteBranch [] $ \expr -> do
+    let mspec = listFoldSpec expr
+    modify $ \s -> maybeToList mspec ++ s
+    numSpecs <- length <$> get
+    case mspec of
+        Nothing -> return ()
+        Just s  -> lift $ message $ "foldFoldFusion: " ++ dump s
+    return expr
 
 
 --------------------------------------------------------------------------------
@@ -53,9 +60,9 @@ isFusable fs1 fs2 =
 
 
 --------------------------------------------------------------------------------
-isListFold :: Expr Var -> Maybe FoldSpec
+listFoldSpec :: Expr Var -> Maybe FoldSpec
 
-isListFold (App (App (App (App (App (Var foldrVar) _) rTyp) cons) nilF) d)
+listFoldSpec (App (App (App (App (App (Var foldrVar) _) rTyp) cons) nilF) d)
     | Var.varName foldrVar /= PrelNames.foldrName = Nothing
     | otherwise                                   = do
         rTyp' <- fromType rTyp
@@ -69,7 +76,7 @@ isListFold (App (App (App (App (App (Var foldrVar) _) rTyp) cons) nilF) d)
     fromType (Type t) = Just t
     fromType _        = Nothing
 
-isListFold _                                      = Nothing
+listFoldSpec _                                      = Nothing
 
 
 --------------------------------------------------------------------------------
