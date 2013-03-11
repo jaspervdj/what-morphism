@@ -54,7 +54,7 @@ toBuild e@(App x y) = do
 
 toBuild (Lam x y) = Lam x <$> toBuild y
 
--- TODO: We might want to the let bindings for the DataCon occurences
+-- TODO: We might want search the let bindings for the DataCon occurences
 toBuild (Let bs e) = Let bs <$> toBuild e
 
 toBuild (Case e b t alts) = Case e b t <$> mapM toBuild' alts
@@ -73,6 +73,8 @@ toBuild (Coercion c) = return (Coercion c)
 
 
 --------------------------------------------------------------------------------
+-- | TODO: We generally want to search for a DataCon OR recursion to our
+-- function (needs to be added in Reader).
 appToDataCon :: Expr Var -> Maybe DataCon
 appToDataCon (App e _) = appToDataCon e
 appToDataCon (Var var)
