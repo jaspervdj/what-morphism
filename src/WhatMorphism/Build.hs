@@ -97,6 +97,9 @@ replace (Coercion c) = return (Coercion c)
 -- | TODO: We generally want to search for a DataCon OR recursion to our
 -- function (needs to be added in Reader).
 --
+-- TODO: What if we have (App (Lam x y) z)? Are we allowed to look inside the
+-- Lam?
+--
 -- * Returns 'Nothing' on recursion
 --
 -- * Returns the 'DataCon' when one is found
