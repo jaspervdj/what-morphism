@@ -17,6 +17,7 @@ Library
     WhatMorphism
 
   Other-modules:
+    WhatMorphism.Build
     WhatMorphism.DirectedGraph
     WhatMorphism.Dump
     WhatMorphism.Expr

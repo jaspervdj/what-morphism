@@ -25,6 +25,7 @@ import           Var
 
 
 --------------------------------------------------------------------------------
+import           WhatMorphism.Build
 import           WhatMorphism.Dump
 import           WhatMorphism.Expr
 import           WhatMorphism.Function
@@ -41,16 +42,9 @@ whatMorphismPass = mapM whatMorphism
 --------------------------------------------------------------------------------
 whatMorphism :: CoreBind -> CoreM CoreBind
 whatMorphism coreBind = do
-    {-
-    name <- runRewriteM $ findName "Data.List" "intercalate"
-    CoreM.putMsgS $ case name of
-        Left err -> err
-        Right x  -> dump x
-    -}
-
     coreBind' <- withBinds coreBind $ \f e -> do
-        _   <- runRewriteM $ message $ "====== New-style approach: " ++ dump f
-        res <- runRewriteM $ toFold f e
+        _   <- runRewriteM $ message $ "====== toBuild: " ++ dump f
+        res <- runRewriteM $ toBuild f e
         _   <- runRewriteM $ case res of
             Left err -> message $ "====== Error: " ++ err
             Right e' -> message $ "====== Ok: "    ++ dump e'
@@ -59,27 +53,14 @@ whatMorphism coreBind = do
             Right e' -> e'
 
     coreBind'' <- withBinds coreBind' $ \f e -> do
-        _   <- runRewriteM $ message $ "====== foldFoldFusion " ++ dump f
-        res <- runRewriteM $ foldFoldFusion e
+        _   <- runRewriteM $ message $ "====== toFold: " ++ dump f
+        res <- runRewriteM $ toFold f e
         _   <- runRewriteM $ case res of
             Left err -> message $ "====== Error: " ++ err
             Right e' -> message $ "====== Ok: "    ++ dump e'
         return $ case res of
             Left  _  -> e
             Right e' -> e'
-
-    {-
-    forM_ (fromBinds coreBind) $ \(f, e) -> do
-
-        _   <- runRewriteM $ pretty e >>= \e' -> message $ "Body: " ++ e'
-        res <- runRewriteM $ catchError (rewrite f e) (const $ return NoFold)
-        _   <- runRewriteM $ case res of
-            Left err -> message $ "Error: " ++ err
-            Right x  -> do
-                name' <- pretty (functionTerm f)
-                message $ "RewriteResult: " ++ name' ++ " " ++ show x
-        return ()
-    -}
 
     return coreBind''
 

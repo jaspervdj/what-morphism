@@ -7,16 +7,17 @@
 -- The forall parameter is of huge importance, since otherwise we can just
 -- construct lists any way we like and ignore the passed-in constructors.
 module WhatMorphism.Build
-    (
+    ( toBuild
     ) where
 
 
 --------------------------------------------------------------------------------
 import           Control.Applicative   (pure, (<$>), (<*>))
-import           Control.Monad.Reader  (ReaderT, runReaderT)
+import           Control.Monad.Reader  (ReaderT, runReaderT, ask)
 import           Control.Monad.Trans   (lift)
 import           Control.Monad.Writer  (WriterT, runWriterT, tell)
 import           CoreSyn
+import           Data.Maybe            (maybeToList)
 import           DataCon               (DataCon)
 import qualified IdInfo                as IdInfo
 import           Var                   (Var)
@@ -24,7 +25,27 @@ import qualified Var                   as Var
 
 
 --------------------------------------------------------------------------------
+import           WhatMorphism.Dump
 import           WhatMorphism.RewriteM
+import           WhatMorphism.SynEq
+
+
+--------------------------------------------------------------------------------
+toBuild :: Var -> Expr Var -> RewriteM (Expr Var)
+toBuild f body = do
+    -- Run to detect data constructors
+    (_, dataCons) <- runWriterT $ runReaderT (replace body) (BuildRead f [])
+
+    -- TODO: Second run to replace them
+    message $ "DataCons: " ++ dump dataCons
+    return body
+
+
+--------------------------------------------------------------------------------
+data BuildRead = BuildRead
+    { buildVar          :: Var
+    , buildReplacements :: [(DataCon, Expr Var)]
+    }
 
 
 --------------------------------------------------------------------------------
@@ -32,7 +53,7 @@ import           WhatMorphism.RewriteM
 --
 -- - A list of used DataCon's
 -- - A function which allows replacement of these DataCon's by other expressions
-type Build a = ReaderT [(DataCon, Expr Var)] (WriterT [DataCon] RewriteM) a
+type Build a = ReaderT BuildRead (WriterT [DataCon] RewriteM) a
 
 
 --------------------------------------------------------------------------------
@@ -41,44 +62,57 @@ liftRewriteM = lift . lift
 
 
 --------------------------------------------------------------------------------
-toBuild :: Expr Var -> Build (Expr Var)
-toBuild (Var x) = return (Var x)
+replace :: Expr Var -> Build (Expr Var)
+replace (Var x) = return (Var x)
 
-toBuild (Lit x) = return (Lit x)
+replace (Lit x) = return (Lit x)
 
 -- Real work here. TODO: replacement?
-toBuild e@(App x y) = do
-    dc <- liftRewriteM $ liftMaybe "No DataCon found" $ appToDataCon e
-    tell [dc]
+replace e@(App x y) = do
+    dc <- recursionOrDataCon e
+    tell $ maybeToList dc
     return (App x y)
 
-toBuild (Lam x y) = Lam x <$> toBuild y
+replace (Lam x y) = Lam x <$> replace y
 
 -- TODO: We might want search the let bindings for the DataCon occurences
-toBuild (Let bs e) = Let bs <$> toBuild e
+replace (Let bs e) = Let bs <$> replace e
 
-toBuild (Case e b t alts) = Case e b t <$> mapM toBuild' alts
+replace (Case e b t alts) = Case e b t <$> mapM replace' alts
   where
-    toBuild' (ac, bs, ae) = do
-        ae' <- toBuild ae
+    replace' (ac, bs, ae) = do
+        ae' <- replace ae
         return (ac, bs, ae')
 
-toBuild (Cast e c) = Cast <$> toBuild e <*> pure c
+replace (Cast e c) = Cast <$> replace e <*> pure c
 
-toBuild (Tick t e) = Tick t <$> toBuild e
+replace (Tick t e) = Tick t <$> replace e
 
-toBuild (Type t) = return (Type t)
+replace (Type t) = return (Type t)
 
-toBuild (Coercion c) = return (Coercion c)
+replace (Coercion c) = return (Coercion c)
 
 
 --------------------------------------------------------------------------------
 -- | TODO: We generally want to search for a DataCon OR recursion to our
 -- function (needs to be added in Reader).
-appToDataCon :: Expr Var -> Maybe DataCon
-appToDataCon (App e _) = appToDataCon e
-appToDataCon (Var var)
-    | Var.isId var     = case Var.idDetails var of
-        IdInfo.DataConWorkId dc -> Just dc
-        _                       -> Nothing
-appToDataCon _         = Nothing
+--
+-- * Returns 'Nothing' on recursion
+--
+-- * Returns the 'DataCon' when one is found
+--
+-- * 'fail's otherwise
+recursionOrDataCon :: Expr Var -> Build (Maybe DataCon)
+recursionOrDataCon e = do
+    recursionVar <- buildVar <$> ask
+    case e of
+        (App e' _) -> recursionOrDataCon e'
+        (Var var)
+            | var .==. recursionVar -> return Nothing
+            | Var.isId var          -> case Var.idDetails var of
+                IdInfo.DataConWorkId dc -> return $ Just dc
+                _                       -> fail' $ "No DataCon Id: " ++ dump var
+            | otherwise             -> fail' "Unexpected Var"
+        _ -> fail' "No App or Var found"
+  where
+    fail' err = fail $ "WhatMorphism.Build.recursionOrDataCon: " ++ err
