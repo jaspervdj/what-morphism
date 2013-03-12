@@ -97,9 +97,6 @@ replace (Coercion c) = return (Coercion c)
 -- | TODO: We generally want to search for a DataCon OR recursion to our
 -- function (needs to be added in Reader).
 --
--- TODO: What if we have (App (Lam x y) z)? Are we allowed to look inside the
--- Lam?
---
 -- * Returns 'Nothing' on recursion
 --
 -- * Returns the 'DataCon' when one is found
@@ -109,7 +106,11 @@ recursionOrDataCon :: Expr Var -> Build (Maybe DataCon)
 recursionOrDataCon e = do
     recursionVar <- buildVar <$> ask
     case e of
-        (App e' _) -> recursionOrDataCon e'
+        -- It seems like GHC sometimes generates weird code like this. If
+        -- needed, this can be made more general by remembering the number of
+        -- 'Lam's we can skip. 
+        (App (Lam _ e') _) -> recursionOrDataCon e'
+        (App e' _)         -> recursionOrDataCon e'
         (Var var)
             | var .==. recursionVar -> return Nothing
             | Var.isId var          -> case Var.idDetails var of
