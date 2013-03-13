@@ -13,11 +13,10 @@ module WhatMorphism.Build
 
 --------------------------------------------------------------------------------
 import           Control.Applicative   (pure, (<$>), (<*>))
-import           Control.Monad.Reader  (ReaderT, runReaderT, ask)
+import           Control.Monad.Reader  (ReaderT, ask, runReaderT)
 import           Control.Monad.Trans   (lift)
 import           Control.Monad.Writer  (WriterT, runWriterT, tell)
 import           CoreSyn
-import           Data.Maybe            (maybeToList)
 import           DataCon               (DataCon)
 import qualified IdInfo                as IdInfo
 import           Var                   (Var)
@@ -36,6 +35,7 @@ toBuild f body = do
     -- Run to detect data constructors
     (_, dataCons) <- runWriterT $ runReaderT (replace body) (BuildRead f [])
 
+    -- TODO: Figure out replacements
     -- TODO: Second run to replace them
     message $ "DataCons: " ++ dump dataCons
     return body
@@ -44,7 +44,7 @@ toBuild f body = do
 --------------------------------------------------------------------------------
 data BuildRead = BuildRead
     { buildVar          :: Var
-    , buildReplacements :: [(DataCon, Expr Var)]
+    , buildReplacements :: [(DataCon, Var)]
     }
 
 
@@ -54,6 +54,19 @@ data BuildRead = BuildRead
 -- - A list of used DataCon's
 -- - A function which allows replacement of these DataCon's by other expressions
 type Build a = ReaderT BuildRead (WriterT [DataCon] RewriteM) a
+
+
+--------------------------------------------------------------------------------
+replacementForDataCon :: Var -> DataCon -> Build Var
+replacementForDataCon original dataCon = do
+    replacements <- buildReplacements <$> ask
+    case lookup dataCon replacements of
+        Just v  -> return v
+        Nothing -> do
+            liftRewriteM $ message $
+                "WhatMorphism.Build.replacementForDataCon: " ++
+                "No replacement for " ++ dump dataCon ++ ", using original"
+            return original
 
 
 --------------------------------------------------------------------------------
@@ -68,10 +81,9 @@ replace (Var x) = return (Var x)
 replace (Lit x) = return (Lit x)
 
 -- Real work here. TODO: replacement?
-replace e@(App x y) = do
-    dc <- recursionOrDataCon e
-    tell $ maybeToList dc
-    return (App x y)
+replace e@(App _ _) = do
+    e' <- recursionOrReplaceDataCon e
+    return e'
 
 replace (Lam x y) = Lam x <$> replace y
 
@@ -102,21 +114,25 @@ replace (Coercion c) = return (Coercion c)
 -- * Returns the 'DataCon' when one is found
 --
 -- * 'fail's otherwise
-recursionOrDataCon :: Expr Var -> Build (Maybe DataCon)
-recursionOrDataCon e = do
+recursionOrReplaceDataCon :: Expr Var -> Build (Expr Var)
+recursionOrReplaceDataCon e = do
     recursionVar <- buildVar <$> ask
     case e of
         -- It seems like GHC sometimes generates weird code like this. If
         -- needed, this can be made more general by remembering the number of
-        -- 'Lam's we can skip. 
-        (App (Lam _ e') _) -> recursionOrDataCon e'
-        (App e' _)         -> recursionOrDataCon e'
+        -- 'Lam's we can skip.
+        (App (Lam x e') a) ->
+            App <$> (Lam x <$> recursionOrReplaceDataCon e') <*> pure a
+        (App e' a)         -> App <$> recursionOrReplaceDataCon e' <*> pure a
         (Var var)
-            | var .==. recursionVar -> return Nothing
+            | var .==. recursionVar -> return e
             | Var.isId var          -> case Var.idDetails var of
-                IdInfo.DataConWorkId dc -> return $ Just dc
+                IdInfo.DataConWorkId dc -> do
+                    tell [dc]
+                    replacement <- replacementForDataCon var dc
+                    return (Var replacement)
                 _                       -> fail' $ "No DataCon Id: " ++ dump var
             | otherwise             -> fail' "Unexpected Var"
         _ -> fail' "No App or Var found"
   where
-    fail' err = fail $ "WhatMorphism.Build.recursionOrDataCon: " ++ err
+    fail' err = fail $ "WhatMorphism.Build.recursionOrReplaceDataCon: " ++ err
