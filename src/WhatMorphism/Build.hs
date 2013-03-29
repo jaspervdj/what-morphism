@@ -18,7 +18,9 @@ import           Control.Monad.Trans   (lift)
 import           Control.Monad.Writer  (WriterT, runWriterT, tell)
 import           CoreSyn
 import           DataCon               (DataCon)
+import qualified DataCon               as DataCon
 import qualified IdInfo                as IdInfo
+import qualified Type                  as Type
 import           Var                   (Var)
 import qualified Var                   as Var
 
@@ -82,7 +84,7 @@ replace (Lit x) = return (Lit x)
 
 -- Real work here. TODO: replacement?
 replace e@(App _ _) = do
-    e' <- recursionOrReplaceDataCon e
+    (e', _) <- recursionOrReplaceDataCon e
     return e'
 
 replace (Lam x y) = Lam x <$> replace y
@@ -109,30 +111,49 @@ replace (Coercion c) = return (Coercion c)
 -- | TODO: We generally want to search for a DataCon OR recursion to our
 -- function (needs to be added in Reader).
 --
--- * Returns 'Nothing' on recursion
---
--- * Returns the 'DataCon' when one is found
---
--- * 'fail's otherwise
-recursionOrReplaceDataCon :: Expr Var -> Build (Expr Var)
+-- Also returns a list of recursiveIndices so we know what other places to
+-- check...
+recursionOrReplaceDataCon :: Expr Var -> Build (Expr Var, [Bool])
 recursionOrReplaceDataCon e = do
     recursionVar <- buildVar <$> ask
     case e of
         -- It seems like GHC sometimes generates weird code like this. If
         -- needed, this can be made more general by remembering the number of
         -- 'Lam's we can skip.
-        (App (Lam x e') a) ->
-            App <$> (Lam x <$> recursionOrReplaceDataCon e') <*> pure a
-        (App e' a)         -> App <$> recursionOrReplaceDataCon e' <*> pure a
+        (App (Lam x e') a) -> do
+            (e'', ris) <- recursionOrReplaceDataCon e'
+            return (App (Lam x e'') a, ris)
+        (App e' a)         -> do
+            (e'', ris) <- recursionOrReplaceDataCon e'
+            case ris of
+                []           -> return (App e'' a, ris)
+                (rec : ris') -> do
+                    liftRewriteM $ message $ "Checking App: " ++ show ris
+                    (a', _) <- if rec
+                        then recursionOrReplaceDataCon a
+                        else return (a, [])
+                    return (App e'' a', ris')
         (Var var)
-            | var .==. recursionVar -> return e
+            | var .==. recursionVar -> do
+                liftRewriteM $ message $ "Recursion found, OK"
+                return (e, [])
             | Var.isId var          -> case Var.idDetails var of
                 IdInfo.DataConWorkId dc -> do
                     tell [dc]
                     replacement <- replacementForDataCon var dc
-                    return (Var replacement)
+                    let ris = recursiveIndices dc
+                    liftRewriteM $ message $ "Recursive indices for " ++
+                        (dump dc) ++ ": " ++ show ris
+                    return (Var replacement, recursiveIndices dc)
                 _                       -> fail' $ "No DataCon Id: " ++ dump var
             | otherwise             -> fail' "Unexpected Var"
         _ -> fail' "No App or Var found"
   where
     fail' err = fail $ "WhatMorphism.Build.recursionOrReplaceDataCon: " ++ err
+
+
+--------------------------------------------------------------------------------
+recursiveIndices :: DataCon -> [Bool]
+recursiveIndices dc =
+    let (tyVars, _, args, ty) = DataCon.dataConSig dc
+    in map (const False) tyVars ++ map (Type.eqType ty) args
