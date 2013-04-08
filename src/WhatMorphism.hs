@@ -5,12 +5,15 @@ module WhatMorphism
 
 
 --------------------------------------------------------------------------------
-import           Data.List         (intersperse)
+import qualified CoreMonad             as CoreMonad
+import           Data.List             (intersperse)
 import           GhcPlugins
+import qualified Serialized            as Serialized
 
 
 --------------------------------------------------------------------------------
 import           WhatMorphism.Pass
+import           WhatMorphism.RewriteM
 
 
 --------------------------------------------------------------------------------
@@ -26,5 +29,16 @@ installWhatMorphism _args todos = do
     reinitializeGlobals
     return $ intersperse passTodo todos
   where
-    pass     = bindsOnlyPass whatMorphismPass
     passTodo = CoreDoPasses [CoreDoPluginPass "WhatMorphism" pass]
+    pass mg  = do
+        register  <- CoreMonad.getFirstAnnotations
+            Serialized.deserializeWithData mg
+        mg_binds' <- runRewriteM (whatMorphismPass $ mg_binds mg)
+            (RewriteRead register)
+        case mg_binds' of
+            Left err     -> do
+                CoreMonad.putMsgS $ "Pass failed: " ++ err
+                return mg
+            Right binds' -> do
+                CoreMonad.putMsgS "Pass okay!"
+                return mg {mg_binds = binds'}

@@ -35,32 +35,24 @@ import           WhatMorphism.RewriteM
 
 
 --------------------------------------------------------------------------------
-whatMorphismPass :: [CoreBind] -> CoreM [CoreBind]
+whatMorphismPass :: [CoreBind] -> RewriteM [CoreBind]
 whatMorphismPass = mapM whatMorphism
 
 
 --------------------------------------------------------------------------------
-whatMorphism :: CoreBind -> CoreM CoreBind
+whatMorphism :: CoreBind -> RewriteM CoreBind
 whatMorphism coreBind = do
     coreBind' <- withBinds coreBind $ \f e -> do
-        _   <- runRewriteM $ message $ "====== toBuild: " ++ dump f
-        res <- runRewriteM $ toBuild f e
-        _   <- runRewriteM $ case res of
-            Left err -> message $ "====== Error: " ++ err
-            Right e' -> message $ "====== Ok: "    ++ dump e'
-        return $ case res of
-            Left  _  -> e
-            Right e' -> e'
+        message $ "====== toBuild: " ++ dump f
+        catchError (toBuild f e) $ \err -> do
+            message $ "====== Error: " ++ err
+            return e
 
     coreBind'' <- withBinds coreBind' $ \f e -> do
-        _   <- runRewriteM $ message $ "====== toFold: " ++ dump f
-        res <- runRewriteM $ toFold f e
-        _   <- runRewriteM $ case res of
-            Left err -> message $ "====== Error: " ++ err
-            Right e' -> message $ "====== Ok: "    ++ dump e'
-        return $ case res of
-            Left  _  -> e
-            Right e' -> e'
+        message $ "====== toFold: " ++ dump f
+        catchError (toFold f e) $ \err -> do
+            message $ "====== Error: " ++ err
+            return e
 
     return coreBind''
 
