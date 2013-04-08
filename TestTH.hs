@@ -14,6 +14,14 @@ data List a
 --------------------------------------------------------------------------------
 $(deriveFold ''List "foldList")
 $(deriveBuild ''List "buildList")
+{-# RULES "foldList/buildList"
+    forall (g :: forall b. (a -> b -> b) -> b -> b) c n.
+    foldList c n (buildList g) = g c n #-}
+
+
+--------------------------------------------------------------------------------
+foldListTest :: Int
+foldListTest = foldList (+) 0 buildListTest
 
 
 --------------------------------------------------------------------------------
