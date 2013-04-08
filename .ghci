@@ -1,1 +1,1 @@
-:set -isrc -package ghc
+:set -XTemplateHaskell -isrc -package ghc

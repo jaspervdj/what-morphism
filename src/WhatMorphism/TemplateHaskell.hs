@@ -1,6 +1,7 @@
 --------------------------------------------------------------------------------
 module WhatMorphism.TemplateHaskell
     ( deriveFold
+    , deriveBuild
     ) where
 
 
@@ -10,19 +11,20 @@ import           Language.Haskell.TH
 
 
 --------------------------------------------------------------------------------
-deriveFold :: Name -> Q [Dec]
-deriveFold typeName = do
+deriveFold :: Name -> String -> Q [Dec]
+deriveFold typeName foldName = do
     info <- reify typeName
     case info of
-        TyConI (DataD _ctx name bndrs cs _derives) -> mkFold name bndrs cs
+        TyConI (DataD _ctx name bndrs cs _derives) ->
+            mkFold foldName name bndrs cs
         _                                          -> fail $
             "WhatMorphism.TemplateHaskell.deriveFold: " ++
             "can only derive simple data declarations"
 
 
 --------------------------------------------------------------------------------
-mkFold :: Name -> [TyVarBndr] -> [Con] -> Q [Dec]
-mkFold typeName typeBndrs cons = do
+mkFold :: String -> Name -> [TyVarBndr] -> [Con] -> Q [Dec]
+mkFold foldName typeName typeBndrs cons = do
 
     a      <- newName "a"  -- Result type of the fold
     consFs <- forM cons $ \c -> do
@@ -34,7 +36,7 @@ mkFold typeName typeBndrs cons = do
     x      <- newName "x"  -- Argument we're destroying
 
     return
-        [ SigD foldName $ ForallT (typeBndrs ++ [PlainTV a]) [] $
+        [ SigD foldName' $ ForallT (typeBndrs ++ [PlainTV a]) [] $
             mkFunTy
                 ([mkFunTy
                     [ if isRecursive t then (VarT a) else t
@@ -45,7 +47,7 @@ mkFold typeName typeBndrs cons = do
                  ] ++ [typ])
                 (VarT a)
 
-        , FunD foldName
+        , FunD foldName'
             [ Clause
                 ([VarP f | (_, f, _) <- consFs] ++ [VarP x])
                 (NormalB
@@ -54,7 +56,7 @@ mkFold typeName typeBndrs cons = do
                             (ConP (conName c) (map VarP $ map fst ys))
                             (NormalB $ mkAppE (VarE f)
                                 [ if isRecursive t
-                                    then mkAppE (VarE foldName)
+                                    then mkAppE (VarE foldName')
                                             ([VarE f' | (_, f', _) <- consFs] ++
                                                 [VarE y])
                                     else VarE y
@@ -67,9 +69,51 @@ mkFold typeName typeBndrs cons = do
             ]
         ]
   where
-    typ      = mkAppTy typeName typeBndrs
-    foldName = mkName $ "fold" ++ nameBase typeName
+    foldName'     = mkName foldName
+    typ           = mkAppTy typeName typeBndrs
+    isRecursive t = typ == t
 
+
+--------------------------------------------------------------------------------
+deriveBuild :: Name -> String -> Q [Dec]
+deriveBuild typeName buildName = do
+    info <- reify typeName
+    case info of
+        TyConI (DataD _ctx name bndrs cs _derives) ->
+            mkBuild buildName name bndrs cs
+        _                                          -> fail $
+            "WhatMorphism.TemplateHaskell.deriveBuild: " ++
+            "can only derive simple data declarations"
+
+
+--------------------------------------------------------------------------------
+mkBuild :: String -> Name -> [TyVarBndr] -> [Con] -> Q [Dec]
+mkBuild buildName typeName typeBndrs cons = do
+    b <- newName "b"  -- Internal return type
+    return
+        [ SigD buildName' $ ForallT (typeBndrs) [] $
+            mkFunTy
+                [ForallT [PlainTV b] []
+                    (mkFunTy
+                        [mkFunTy
+                            [ if isRecursive t then (VarT b) else t
+                            | t <- conTypes con
+                            ]
+                            (VarT b)
+                        | con <- cons]
+                        (VarT b))]
+                typ
+
+        , FunD buildName'
+            [ Clause
+                []
+                (NormalB (VarE (mkName "undefined")))
+                []
+            ]
+        ]
+  where
+    buildName'    = mkName buildName
+    typ           = mkAppTy typeName typeBndrs
     isRecursive t = typ == t
 
 
