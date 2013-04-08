@@ -10,22 +10,35 @@ module WhatMorphism.RewriteM
     , liftMaybe
     , liftMaybe'
     , message
+    , registeredFold
+    , isRegisteredFoldOrBuild
     ) where
 
 
 --------------------------------------------------------------------------------
-import           Control.Applicative      (Alternative (..), Applicative (..))
-import           Control.Monad            (ap)
+import           Control.Applicative      (Alternative (..), Applicative (..),
+                                           (<$>))
+import           Control.Monad            (ap, forM)
 import           Control.Monad.Error      (MonadError (..))
 import           CoreMonad                (CoreM)
 import qualified CoreMonad                as CoreMonad
+import qualified HscTypes                 as HscTypes
+import qualified Language.Haskell.TH      as TH
+import qualified Name                     as Name
+import qualified OccName                  as OccName
+import           Type                     (Type)
+import qualified Type                     as Type
 import           UniqFM                   (UniqFM)
+import qualified UniqFM                   as UniqFM
 import           UniqSupply               (MonadUnique (..))
 import qualified UniqSupply               as Unique
+import           Var                      (Id)
+import qualified Var                      as Var
 
 
 --------------------------------------------------------------------------------
 import           WhatMorphism.Annotations
+import           WhatMorphism.Dump
 
 
 --------------------------------------------------------------------------------
@@ -119,3 +132,51 @@ liftMaybe' = liftMaybe "WhatMorphism.RewriteM.liftMaybe'"
 --------------------------------------------------------------------------------
 message :: String -> RewriteM ()
 message = liftCoreM . CoreMonad.putMsgS
+
+
+--------------------------------------------------------------------------------
+rewriteAsk :: RewriteM RewriteRead
+rewriteAsk = RewriteM $ \r -> return $ Right r
+
+
+--------------------------------------------------------------------------------
+registerFor :: Type -> RewriteM RegisterFoldBuild
+registerFor typ = do
+    case Type.splitTyConApp_maybe typ of
+        Nothing      -> fail "No TyCon, nothing registered"
+        Just (tc, _) -> do
+            register <- rewriteRegister <$> rewriteAsk
+            case UniqFM.lookupUFM register tc of
+                Nothing -> fail $ "No register for " ++ dump typ
+                Just r  -> return r
+
+
+--------------------------------------------------------------------------------
+registeredFold :: Type -> RewriteM Id
+registeredFold typ = do
+    register <- registerFor typ
+    lookupThName (registerFold register)
+
+
+--------------------------------------------------------------------------------
+lookupThName :: TH.Name -> RewriteM Id
+lookupThName thName = do
+    name <- liftCoreM $ CoreMonad.thNameToGhcName thName
+    case name of
+        Nothing -> fail $ "Could not convert " ++ show thName ++ " to GHC name"
+        Just n  -> do
+            message $ "Looking up ID: " ++ dump n
+            liftCoreM $ HscTypes.lookupId n
+
+
+--------------------------------------------------------------------------------
+-- | Warning!!!
+isRegisteredFoldOrBuild :: Id -> RewriteM Bool
+isRegisteredFoldOrBuild id' = do
+    message $ "Checking " ++ dump id'
+    reg <- rewriteRegister <$> rewriteAsk
+    return $ or
+        [ TH.nameBase n ==
+            OccName.occNameString (Name.nameOccName (Var.varName id'))
+        | RegisterFoldBuild f b <- UniqFM.eltsUFM reg, n <- [f, b]
+        ]

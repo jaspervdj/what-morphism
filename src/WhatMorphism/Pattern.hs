@@ -9,7 +9,9 @@ import           Control.Applicative   ((<|>))
 import           Control.Monad         (forM)
 import           CoreSyn
 import           Data.List             (find)
+import           DataCon               (DataCon)
 import qualified MkCore                as MkCore
+import qualified TyCon                 as TyCon
 import           Type                  (Type)
 import qualified Type                  as Type
 import qualified TysWiredIn            as TysWiredIn
@@ -58,10 +60,34 @@ toFoldOver f mkF d (Case (Var x) _ rTyp alts)
             message $ "Now: " ++ dump expr'
             assertWellScoped (x : bnds) expr'
             return (ac, expr')
-        fold <- mkListFold d rTyp alts'
+        -- fold <- mkListFold d rTyp alts'
+        fold <- mkFold d rTyp alts'
         return $ mkF fold
     | otherwise                 = fail "Wrong argument destructed"
 toFoldOver _ _ _ _              = fail "No top-level Case"
+
+
+--------------------------------------------------------------------------------
+mkFold :: Var                   -- ^ Destructed thingy
+       -> Type                  -- ^ Return type
+       -> [(AltCon, Expr Var)]  -- ^ Case bodies
+       -> RewriteM (Expr Var)   -- ^ Resulting expression
+mkFold d rTyp alts = do
+    conses <- getDataCons (Var.varType d)
+    fold   <- registeredFold (Var.varType d)
+    message $ "Conses: " ++ dump conses
+    message $ "Our registered fold is: " ++ dump fold
+    message $ "Of the type: " ++ dump (Var.varType fold)
+    fail "TODO"
+
+
+--------------------------------------------------------------------------------
+-- | This should return the datacons in the correct order!
+getDataCons :: Type -> RewriteM [DataCon]
+getDataCons typ = case Type.splitTyConApp_maybe typ of
+    Nothing      -> fail "Destructd type is no TyConApp?"
+    Just (tc, _) -> liftMaybe "No DataCon's found" $
+        TyCon.tyConDataCons_maybe tc
 
 
 --------------------------------------------------------------------------------

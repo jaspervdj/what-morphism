@@ -43,16 +43,24 @@ whatMorphismPass = mapM whatMorphism
 whatMorphism :: CoreBind -> RewriteM CoreBind
 whatMorphism coreBind = do
     coreBind' <- withBinds coreBind $ \f e -> do
-        message $ "====== toBuild: " ++ dump f
-        catchError (toBuild f e) $ \err -> do
-            message $ "====== Error: " ++ err
-            return e
+        reg <- isRegisteredFoldOrBuild f
+        if reg
+            then return e
+            else do
+                message $ "====== toBuild: " ++ dump f
+                catchError (toBuild f e) $ \err -> do
+                    message $ "====== Error: " ++ err
+                    return e
 
     coreBind'' <- withBinds coreBind' $ \f e -> do
-        message $ "====== toFold: " ++ dump f
-        catchError (toFold f e) $ \err -> do
-            message $ "====== Error: " ++ err
-            return e
+        reg <- isRegisteredFoldOrBuild f
+        if reg
+            then return e
+            else do
+                message $ "====== toFold: " ++ dump f
+                catchError (toFold f e) $ \err -> do
+                    message $ "====== Error: " ++ err
+                    return e
 
     return coreBind''
 
