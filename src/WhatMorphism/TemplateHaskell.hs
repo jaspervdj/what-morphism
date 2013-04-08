@@ -90,6 +90,7 @@ deriveBuild typeName buildName = do
 mkBuild :: String -> Name -> [TyVarBndr] -> [Con] -> Q [Dec]
 mkBuild buildName typeName typeBndrs cons = do
     b <- newName "b"  -- Internal return type
+    g <- newName "g"  -- Function given by the user
     return
         [ SigD buildName' $ ForallT (typeBndrs) [] $
             mkFunTy
@@ -106,8 +107,10 @@ mkBuild buildName typeName typeBndrs cons = do
 
         , FunD buildName'
             [ Clause
-                []
-                (NormalB (VarE (mkName "undefined")))
+                [VarP g]
+                (NormalB (mkAppE
+                    (VarE g)
+                    [ConE (conName con) | con <- cons]))
                 []
             ]
         ]
