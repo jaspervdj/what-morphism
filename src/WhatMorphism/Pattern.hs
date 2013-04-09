@@ -39,7 +39,7 @@ toFold' :: Expr Var
         -> RewriteM (Expr Var)
 toFold' f mkF (Lam x body) =
     toFoldOver (\t -> App f (Var t)) (\e -> mkF (Lam x e)) x body <|>
-    toFold' (App f (Var x)) (\e -> Lam x (mkF e)) body
+    toFold' (App f (Var x)) (\e -> mkF (Lam x e)) body
 toFold' _ _   _            = fail "No top-level Lam"
 
 
