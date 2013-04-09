@@ -6,7 +6,7 @@ module WhatMorphism.Pattern
 
 --------------------------------------------------------------------------------
 import           Control.Applicative   ((<|>))
-import           Control.Monad         (forM)
+import           Control.Monad         (forM, mplus)
 import           CoreSyn
 import           Data.List             (find)
 import           DataCon               (DataCon)
@@ -73,12 +73,29 @@ mkFold :: Var                   -- ^ Destructed thingy
        -> [(AltCon, Expr Var)]  -- ^ Case bodies
        -> RewriteM (Expr Var)   -- ^ Resulting expression
 mkFold d rTyp alts = do
-    conses <- getDataCons (Var.varType d)
     fold   <- registeredFold (Var.varType d)
+    conses <- getDataCons (Var.varType d)
+    fargs  <- mapM getAlt conses
     message $ "Conses: " ++ dump conses
     message $ "Our registered fold is: " ++ dump fold
     message $ "Of the type: " ++ dump (Var.varType fold)
-    fail "TODO"
+    return $ MkCore.mkCoreApps (Var fold) $
+        -- Type arguments to destroyed thingy
+        (map Type dTyArgs) ++
+        -- Return type
+        [Type rTyp] ++
+        -- Algebra
+        fargs ++
+        -- Destroyed thingy
+        [Var d]
+  where
+    getAlt dataCon = liftMaybe ("No alt found for " ++ dump dataCon) $
+        lookup (DataAlt dataCon) alts `mplus`
+        lookup DEFAULT alts
+
+    dTyArgs = case Type.splitTyConApp_maybe (Var.varType d) of
+        Just (_, tys) -> tys
+        _             -> []
 
 
 --------------------------------------------------------------------------------

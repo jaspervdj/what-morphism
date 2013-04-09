@@ -18,19 +18,16 @@ module WhatMorphism.RewriteM
 --------------------------------------------------------------------------------
 import           Control.Applicative      (Alternative (..), Applicative (..),
                                            (<$>))
-import           Control.Monad            (ap, forM)
+import           Control.Monad            (ap)
 import           Control.Monad.Error      (MonadError (..))
 import           CoreMonad                (CoreM)
 import qualified CoreMonad                as CoreMonad
-import           Data.Maybe               (fromMaybe)
 import           HscTypes                 (ModGuts)
 import qualified HscTypes                 as HscTypes
-import qualified Language.Haskell.TH      as TH
 import           Name                     (Name)
 import qualified Name                     as Name
 import           OccName                  (OccName)
 import qualified OccName                  as OccName
-import qualified Outputable               as Outputable
 import qualified RdrName                  as RdrName
 import           Type                     (Type)
 import qualified Type                     as Type
