@@ -33,8 +33,9 @@ installWhatMorphism _args todos = do
     pass mg  = do
         register  <- CoreMonad.getFirstAnnotations
             Serialized.deserializeWithData mg
+
         mg_binds' <- runRewriteM (whatMorphismPass $ mg_binds mg)
-            (RewriteRead register)
+            (RewriteRead mg register)
         case mg_binds' of
             Left err     -> do
                 CoreMonad.putMsgS $ "Pass failed: " ++ err

@@ -6,13 +6,12 @@ module WhatMorphism.Annotations
 
 
 --------------------------------------------------------------------------------
-import           Data.Data           (Data)
-import           Data.Typeable       (Typeable)
-import qualified Language.Haskell.TH as TH
+import           Data.Data     (Data)
+import           Data.Typeable (Typeable)
 
 
 --------------------------------------------------------------------------------
 data RegisterFoldBuild = RegisterFoldBuild
-    { registerFold  :: TH.Name
-    , registerBuild :: TH.Name
+    { registerFold  :: String
+    , registerBuild :: String
     } deriving (Data, Typeable, Show)

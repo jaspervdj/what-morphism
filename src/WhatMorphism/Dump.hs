@@ -12,6 +12,7 @@ import           DataCon   (DataCon)
 import           Literal   (Literal)
 import           Name      (Name)
 import qualified Name      as Name
+import           OccName   (OccName)
 import qualified OccName   as OccName
 import           TypeRep   (Type)
 import           Var       (Var)
@@ -48,6 +49,11 @@ instance Dump a => Dump (Maybe a) where
 instance Dump Name where
     dump name = OccName.occNameString (Name.getOccName name) ++ "_" ++
         show (Name.nameUnique name)
+
+
+--------------------------------------------------------------------------------
+instance Dump OccName where
+    dump = OccName.occNameString
 
 
 --------------------------------------------------------------------------------

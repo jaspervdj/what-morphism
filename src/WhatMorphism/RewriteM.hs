@@ -22,10 +22,16 @@ import           Control.Monad            (ap, forM)
 import           Control.Monad.Error      (MonadError (..))
 import           CoreMonad                (CoreM)
 import qualified CoreMonad                as CoreMonad
+import           Data.Maybe               (fromMaybe)
+import           HscTypes                 (ModGuts)
 import qualified HscTypes                 as HscTypes
 import qualified Language.Haskell.TH      as TH
+import           Name                     (Name)
 import qualified Name                     as Name
+import           OccName                  (OccName)
 import qualified OccName                  as OccName
+import qualified Outputable               as Outputable
+import qualified RdrName                  as RdrName
 import           Type                     (Type)
 import qualified Type                     as Type
 import           UniqFM                   (UniqFM)
@@ -43,7 +49,8 @@ import           WhatMorphism.Dump
 
 --------------------------------------------------------------------------------
 data RewriteRead = RewriteRead
-    { rewriteRegister :: UniqFM RegisterFoldBuild
+    { rewriteModGuts  :: ModGuts
+    , rewriteRegister :: UniqFM RegisterFoldBuild
     }
 
 
@@ -155,28 +162,53 @@ registerFor typ = do
 registeredFold :: Type -> RewriteM Id
 registeredFold typ = do
     register <- registerFor typ
-    lookupThName (registerFold register)
+    lookupImportedString (registerFold register)
 
 
 --------------------------------------------------------------------------------
-lookupThName :: TH.Name -> RewriteM Id
-lookupThName thName = do
-    name <- liftCoreM $ CoreMonad.thNameToGhcName thName
-    case name of
-        Nothing -> fail $ "Could not convert " ++ show thName ++ " to GHC name"
-        Just n  -> do
-            message $ "Looking up ID: " ++ dump n
-            liftCoreM $ HscTypes.lookupId n
+lookupImportedString :: String -> RewriteM Id
+lookupImportedString name = do
+    name' <- lookupImportedOccName (OccName.mkVarOcc name)
+    liftCoreM $ HscTypes.lookupId name'
 
 
 --------------------------------------------------------------------------------
--- | Warning!!!
+lookupImportedOccName :: OccName -> RewriteM Name
+lookupImportedOccName oname = do
+    gre <- HscTypes.mg_rdr_env . rewriteModGuts <$> rewriteAsk
+    let candidates = filter isImported $ lookupGlobalRdrEnv gre oname
+    case candidates of
+        []        -> fail $ "No Name found for " ++ dump oname ++ " in rdr_env"
+        (elt : _) -> return (RdrName.gre_name elt)
+  where
+    isImported :: RdrName.GlobalRdrElt -> Bool
+    isImported elt = case RdrName.gre_prov elt of
+        RdrName.Imported _ -> True
+        _                  -> False
+
+
+--------------------------------------------------------------------------------
+-- | This is a SLOW, UGLY replacement for 'RdrName.lookupGlobalRdrEnv'. Why do
+-- we need it? Because the original seems to be broken in very peculiar ways. I
+-- think I might be generating 'OccName's in a wrong way but there is no way to
+-- tell with so little documentation...
+lookupGlobalRdrEnv :: RdrName.GlobalRdrEnv -> OccName -> [RdrName.GlobalRdrElt]
+lookupGlobalRdrEnv env oname =
+    [ elt
+    | elts <- OccName.occEnvElts env
+    , elt  <- elts
+    , OccName.occNameString (Name.nameOccName (RdrName.gre_name elt)) ==
+        OccName.occNameString oname
+    ]
+
+
+--------------------------------------------------------------------------------
+-- | Warning!!! TODO REMOVE ME
 isRegisteredFoldOrBuild :: Id -> RewriteM Bool
 isRegisteredFoldOrBuild id' = do
     message $ "Checking " ++ dump id'
     reg <- rewriteRegister <$> rewriteAsk
     return $ or
-        [ TH.nameBase n ==
-            OccName.occNameString (Name.nameOccName (Var.varName id'))
+        [ n == OccName.occNameString (Name.nameOccName (Var.varName id'))
         | RegisterFoldBuild f b <- UniqFM.eltsUFM reg, n <- [f, b]
         ]
