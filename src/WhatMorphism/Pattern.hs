@@ -99,15 +99,6 @@ mkFold d rTyp alts = do
 
 
 --------------------------------------------------------------------------------
--- | This should return the datacons in the correct order!
-getDataCons :: Type -> RewriteM [DataCon]
-getDataCons typ = case Type.splitTyConApp_maybe typ of
-    Nothing      -> fail "Destructd type is no TyConApp?"
-    Just (tc, _) -> liftMaybe "No DataCon's found" $
-        TyCon.tyConDataCons_maybe tc
-
-
---------------------------------------------------------------------------------
 mkListFold :: Var
            -> Type
            -> [(AltCon, Expr Var)]

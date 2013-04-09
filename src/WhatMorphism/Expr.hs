@@ -11,6 +11,8 @@ module WhatMorphism.Expr
     , binds
     , withBinds
     , foldExpr
+    , guessFunctionReturnType
+    , getDataCons
     ) where
 
 
@@ -22,11 +24,14 @@ import           CoreMonad                  (CoreM)
 import           CoreSyn
 import qualified Data.Generics.Schemes      as Data
 import           Data.Typeable              (cast)
+import           DataCon                    (DataCon)
 import           Literal                    (Literal)
 import qualified Name                       as Name
 import qualified OccName                    as OccName
 import qualified SrcLoc                     as SrcLoc
+import qualified TyCon                      as TyCon
 import           Type                       (Type)
+import qualified Type                       as Type
 import qualified UniqSupply                 as Unique
 import qualified Unique                     as Unique
 import           Unsafe.Coerce              (unsafeCoerce)
@@ -35,6 +40,7 @@ import qualified Var                        as Var
 
 
 --------------------------------------------------------------------------------
+import           WhatMorphism.RewriteM
 import           WhatMorphism.SynEq
 
 
@@ -183,3 +189,17 @@ foldExpr var lit app lam bnrec brec cas cast' tick typ coer = go
     go (Tick t e)      = tick t (go e)
     go (Type t)        = typ t
     go (Coercion c)    = coer c
+
+
+--------------------------------------------------------------------------------
+guessFunctionReturnType :: Type -> Type
+guessFunctionReturnType = snd . Type.splitFunTys . snd . Type.splitForAllTys
+
+
+--------------------------------------------------------------------------------
+-- | This should return the datacons in the correct order!
+getDataCons :: Type -> RewriteM [DataCon]
+getDataCons typ = case Type.splitTyConApp_maybe typ of
+    Nothing      -> fail "getDataCons: type is no TyConApp?"
+    Just (tc, _) -> liftMaybe "No DataCon's found" $
+        TyCon.tyConDataCons_maybe tc

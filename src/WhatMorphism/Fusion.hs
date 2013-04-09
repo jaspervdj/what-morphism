@@ -30,7 +30,7 @@ foldFoldFusion :: Expr Var -> RewriteM (Expr Var)
 foldFoldFusion = rewriteBranch [] $ \expr -> do
     let mspec = listFoldSpec expr
     modify $ \s -> maybeToList mspec ++ s
-    numSpecs <- length <$> get
+    _numSpecs <- length <$> get
     case mspec of
         Nothing -> return ()
         Just s  -> lift $ message $ "foldFoldFusion: " ++ dump s

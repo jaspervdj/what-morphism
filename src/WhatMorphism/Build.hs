@@ -20,6 +20,7 @@ import           CoreSyn
 import           DataCon               (DataCon)
 import qualified DataCon               as DataCon
 import qualified IdInfo                as IdInfo
+import qualified Outputable            as Outputable
 import qualified Type                  as Type
 import           Var                   (Var)
 import qualified Var                   as Var
@@ -27,6 +28,7 @@ import qualified Var                   as Var
 
 --------------------------------------------------------------------------------
 import           WhatMorphism.Dump
+import           WhatMorphism.Expr     (getDataCons, guessFunctionReturnType)
 import           WhatMorphism.RewriteM
 import           WhatMorphism.SynEq
 
@@ -35,11 +37,15 @@ import           WhatMorphism.SynEq
 toBuild :: Var -> Expr Var -> RewriteM (Expr Var)
 toBuild f body = do
     -- Run to detect data constructors
+    let rTyp = guessFunctionReturnType (Var.varType f)
+    liftCoreM $ Outputable.pprTrace "rTyp" (Type.pprType rTyp) $ return ()
+    conses        <- getDataCons rTyp
     (_, dataCons) <- runWriterT $ runReaderT (replace body) (BuildRead f [])
 
     -- TODO: Figure out replacements
     -- TODO: Second run to replace them
     message $ "DataCons: " ++ dump dataCons
+    message $ "Conses: " ++ dump conses
     return body
 
 
