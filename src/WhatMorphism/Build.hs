@@ -39,25 +39,30 @@ import           WhatMorphism.SynEq
 toBuild :: Var -> Expr Var -> RewriteM (Expr Var)
 toBuild f body = do
     -- Run to detect data constructors
-    let rTyp = guessFunctionReturnType (Var.varType f)
-    liftCoreM $ Outputable.pprTrace "rTyp" (Type.pprType rTyp) $ return ()
-    conses        <- getDataCons rTyp
+    let rTy     = guessFunctionReturnType (Var.varType f)
+        rTyArgs = case Type.splitTyConApp_maybe rTy of
+                    Just (_, tyArgs) -> tyArgs
+                    Nothing          -> []
+    liftCoreM $ Outputable.pprTrace "rTy" (Type.pprType rTy) $ return ()
+    conses <- getDataCons rTy
+
+    -- Get the build function, if available
+    build <- registeredBuild rTy
+    liftCoreM $ Outputable.pprTrace "buildType" (Type.pprType (Var.varType build)) $ return ()
+    lamTy <- liftMaybe "Build has no Fun Forall type" $ do
+        let (_, buildTy) = Type.splitForAllTys (Var.varType build)
+        (argTy, _) <- Type.splitFunTy_maybe buildTy
+        (_, lamTy) <- Type.splitForAllTy_maybe argTy
+        return lamTy
+    bTy <- freshTyVar "bbb"
 
     -- Create a worker function 'g'. The type of 'g' is like the fixed type of
     -- 'f', but with a more general return type (TODO).
-    let gTyp = snd $ Type.splitForAllTys (Var.varType f)
-    g <- freshVar "g" gTyp
+    let gTyArgs = fst $ Type.splitFunTys $ snd $ Type.splitForAllTys (Var.varType f)
+        gTy     = Type.mkFunTys gTyArgs (Type.mkTyVarTy bTy)
+    g <- freshVar "g" gTy
     let (fTyBinders, fValBinders, body') = CoreSyn.collectTyAndValBinders body
     newArgs <- forM fValBinders $ \arg -> freshVar "fArg" (Var.varType arg)
-
-    -- Get the build function, if available
-    build <- registeredBuild rTyp
-    liftCoreM $ Outputable.pprTrace "builType" (Type.pprType (Var.varType build)) $ return ()
-    (buildTyArgs, bTy, lamTy) <- liftMaybe "Build has no Fun Forall type" $ do
-        let (buildTyArgs, buildTy) = Type.splitForAllTys (Var.varType build)
-        (argTy, _)             <- Type.splitFunTy_maybe buildTy
-        (bTy, lamTy)           <- Type.splitForAllTy_maybe argTy
-        return (buildTyArgs, bTy, lamTy)
 
     -- The types for the arguments of the lambda MUST EXACTLY MATCH the
     -- different constructors of the datatype. This is EXTREMELY IMPORTANT.
@@ -68,19 +73,25 @@ toBuild f body = do
 
     -- TODO: This run is not needed! But useful for now... in some way or
     -- another.
-    _ <- runReaderT (replace body) (BuildRead f g replacements)
+    body'' <- runReaderT (replace body') (BuildRead f g replacements)
 
-    let body'' =
+    let fBody =
             MkCore.mkCoreLams (fTyBinders ++ newArgs)
-                (MkCore.mkCoreLet
-                    (Rec [(g, MkCore.mkCoreLams fValBinders body')])
-                    (MkCore.mkCoreApps (Var g) (map Var newArgs)))
+                (App
+                    (MkCore.mkCoreApps (Var build) (map Type rTyArgs))
+                    (MkCore.mkCoreLams (bTy : lamArgs)
+                        (Let
+                            (Rec [(g, MkCore.mkCoreLams fValBinders body'')])
+                            (MkCore.mkCoreApps (Var g) (map Var newArgs)))))
+
+    -- Result
+    liftCoreM $ Outputable.pprTrace "fBody" (Outputable.ppr fBody) $ return ()
 
     -- TODO: Figure out replacements
     -- TODO: Second run to replace them
     -- message $ "DataCons: " ++ dump dataCons
     message $ "Conses: " ++ dump conses
-    return body''
+    return fBody
 
 
 --------------------------------------------------------------------------------
@@ -124,9 +135,7 @@ replace (Var x) = return (Var x)
 replace (Lit x) = return (Lit x)
 
 -- Real work here. TODO: replacement?
-replace e@(App _ _) = do
-    (e', _) <- recursionOrReplaceDataCon e
-    return e'
+replace e@(App _ _) = recursionOrReplaceDataCon e
 
 replace (Lam x y) = Lam x <$> replace y
 
@@ -154,16 +163,23 @@ replace (Coercion c) = return (Coercion c)
 --
 -- Also returns a list of recursiveIndices so we know what other places to
 -- check...
-recursionOrReplaceDataCon :: Expr Var -> Build (Expr Var, [Bool])
-recursionOrReplaceDataCon e = do
+recursionOrReplaceDataCon :: Expr Var -> Build (Expr Var)
+recursionOrReplaceDataCon expr = do
     recursionVar <- buildVar <$> ask
-    case e of
+
+    -- In case we replace a constructor, or a (polymorphic) recursive call, we
+    -- don't need the type arguments anymore (I think).
+    let (app, args) = CoreSyn.collectArgs expr
+        numTyArgs   = length $ filter CoreSyn.isTypeArg args
+
+    case app of
         -- It seems like GHC sometimes generates weird code like this. If
         -- needed, this can be made more general by remembering the number of
         -- 'Lam's we can skip.
-        (App (Lam x e') a) -> do
-            (e'', ris) <- recursionOrReplaceDataCon e'
-            return (App (Lam x e'') a, ris)
+        (Lam x e) -> do
+            e' <- recursionOrReplaceDataCon e
+            return $ MkCore.mkCoreApps (Lam x e') args
+        {-
         (App e' a)         -> do
             (e'', ris) <- recursionOrReplaceDataCon e'
             case ris of
@@ -174,17 +190,27 @@ recursionOrReplaceDataCon e = do
                         then recursionOrReplaceDataCon a
                         else return (a, [])
                     return (App e'' a', ris')
+        -}
         (Var var)
             | var .==. recursionVar -> do
+                replacement <- buildVarReplacement <$> ask
                 liftRewriteM $ message $ "Recursion found, OK"
-                return (e, [])
+                return $ MkCore.mkCoreApps (Var replacement) $
+                    drop numTyArgs args
             | Var.isId var          -> case Var.idDetails var of
                 IdInfo.DataConWorkId dc -> do
                     replacement <- replacementForDataCon var dc
                     let ris = recursiveIndices dc
                     liftRewriteM $ message $ "Recursive indices for " ++
                         (dump dc) ++ ": " ++ show ris
-                    return (Var replacement, recursiveIndices dc)
+                    -- TODO: Check if at least length of 'args' and 'ris' is
+                    -- equal?
+                    args' <- forM (zip args ris) $ \(arg, rec) ->
+                        if rec
+                            then recursionOrReplaceDataCon arg
+                            else return arg
+                    return $ MkCore.mkCoreApps (Var replacement) $
+                        drop numTyArgs args'
                 _                       -> fail' $ "No DataCon Id: " ++ dump var
             | otherwise             -> fail' "Unexpected Var"
         _ -> fail' "No App or Var found"
