@@ -91,7 +91,7 @@ rewrite func body = do
                 | Var.varType b `Type.eqType` Var.varType destr = do
                     let needle = replaceArg dIdx (Var b) efunc
                         expr'  = toAppExpr needle
-                    lam <- liftCoreM $ mkLambda cTyp expr' e
+                    lam <- mkLambda cTyp expr' e
                     if count (Var b) lam > 0
                         then throwError $
                             (dump b) ++ " still appears in body: " ++ dump lam
@@ -99,7 +99,7 @@ rewrite func body = do
 
                 -- Otherwise we can just create a lambda expression
                 | otherwise = do
-                    lam <- liftCoreM $ mkLambda (Var.varType b) (Var b) e
+                    lam <- mkLambda (Var.varType b) (Var b) e
                     return (lam, nr)
 
         (expr', recs') <- foldM step (expr, 0) $ reverse bnds

@@ -9,9 +9,7 @@ import           Control.Applicative   ((<|>))
 import           Control.Monad         (forM, mplus)
 import           CoreSyn
 import           Data.List             (find)
-import           DataCon               (DataCon)
 import qualified MkCore                as MkCore
-import qualified TyCon                 as TyCon
 import           Type                  (Type)
 import qualified Type                  as Type
 import qualified TysWiredIn            as TysWiredIn
@@ -131,8 +129,8 @@ rewriteAlt _ _ []       _    body = return body
 rewriteAlt f d (t : ts) rTyp body = do
     expr <- rewriteAlt f d ts rTyp body
     if isRecursive
-        then liftCoreM $ mkLambda rTyp            (f t)   expr
-        else liftCoreM $ mkLambda (Var.varType t) (Var t) expr
+        then mkLambda rTyp            (f t)   expr
+        else mkLambda (Var.varType t) (Var t) expr
   where
     isRecursive = Var.varType t `Type.eqType` Var.varType d
 

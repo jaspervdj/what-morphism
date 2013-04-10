@@ -13,13 +13,16 @@ module WhatMorphism.Build
 
 --------------------------------------------------------------------------------
 import           Control.Applicative   (pure, (<$>), (<*>))
+import           Control.Monad         (forM)
 import           Control.Monad.Reader  (ReaderT, ask, runReaderT)
 import           Control.Monad.Trans   (lift)
 import           Control.Monad.Writer  (WriterT, runWriterT, tell)
-import           CoreSyn
+import           CoreSyn               (Bind (..), Expr (..))
+import qualified CoreSyn               as CoreSyn
 import           DataCon               (DataCon)
 import qualified DataCon               as DataCon
 import qualified IdInfo                as IdInfo
+import qualified MkCore                as MkCore
 import qualified Outputable            as Outputable
 import qualified Type                  as Type
 import           Var                   (Var)
@@ -28,7 +31,7 @@ import qualified Var                   as Var
 
 --------------------------------------------------------------------------------
 import           WhatMorphism.Dump
-import           WhatMorphism.Expr     (getDataCons, guessFunctionReturnType)
+import           WhatMorphism.Expr
 import           WhatMorphism.RewriteM
 import           WhatMorphism.SynEq
 
@@ -40,13 +43,29 @@ toBuild f body = do
     let rTyp = guessFunctionReturnType (Var.varType f)
     liftCoreM $ Outputable.pprTrace "rTyp" (Type.pprType rTyp) $ return ()
     conses        <- getDataCons rTyp
+
+    -- TODO: This run is not needed! But useful for now... in some way or
+    -- another.
     (_, dataCons) <- runWriterT $ runReaderT (replace body) (BuildRead f [])
+
+    -- Create a worker function 'g'. The type of 'g' is like the fixed type of
+    -- 'f', but with a more general return type (TODO).
+    let gTyp = snd $ Type.splitForAllTys (Var.varType f)
+    g <- freshVar "g" gTyp
+    let (fTyBinders, fValBinders, body') = CoreSyn.collectTyAndValBinders body
+    newArgs <- forM fValBinders $ \arg -> freshVar "fArg" (Var.varType arg)
+
+    let body'' =
+            MkCore.mkCoreLams (fTyBinders ++ newArgs)
+                (MkCore.mkCoreLet
+                    (Rec [(g, MkCore.mkCoreLams fValBinders body')])
+                    (MkCore.mkCoreApps (Var g) (map Var newArgs)))
 
     -- TODO: Figure out replacements
     -- TODO: Second run to replace them
     message $ "DataCons: " ++ dump dataCons
     message $ "Conses: " ++ dump conses
-    return body
+    return body''
 
 
 --------------------------------------------------------------------------------

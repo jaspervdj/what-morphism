@@ -5,9 +5,10 @@ module WhatMorphism.Expr
     , subExprsInBranch
     , everywhere
     , count
-    , replace
+    , replaceExpr
     , toVar
     , mkLambda
+    , freshVar
     , binds
     , withBinds
     , foldExpr
@@ -20,7 +21,6 @@ module WhatMorphism.Expr
 import           Coercion                   (Coercion)
 import           Control.Monad              (forM, liftM)
 import           Control.Monad.State.Strict (State, modify, runState)
-import           CoreMonad                  (CoreM)
 import           CoreSyn
 import qualified Data.Generics.Schemes      as Data
 import           Data.Typeable              (cast)
@@ -91,8 +91,8 @@ count needle = Data.everything (+) $ \x -> case cast x of
 
 --------------------------------------------------------------------------------
 -- | Count replacements
-replace :: (Expr Var -> Maybe (Expr Var)) -> Expr Var -> (Expr Var, Int)
-replace f = flip runState 0 . state
+replaceExpr :: (Expr Var -> Maybe (Expr Var)) -> Expr Var -> (Expr Var, Int)
+replaceExpr f = flip runState 0 . state
   where
     state :: Expr Var -> State Int (Expr Var)
     state = Data.everywhereM $ \x -> case cast x of
@@ -132,14 +132,14 @@ toVar _       = Nothing
 -- Becomes something like:
 --
 -- > (\tmp -> foo tmp + tmp) x
-mkLambda :: Type -> Expr Var -> Expr Var -> CoreM (Expr Var)
+mkLambda :: Type -> Expr Var -> Expr Var -> RewriteM (Expr Var)
 mkLambda typ needle haystack = do
-    tmp <- freshVar typ
+    tmp <- freshVar "wm" typ
 
     let check n
             | n .==. needle = Just (Var tmp)
             | otherwise     = Nothing
-        (haystack', repl)   = replace check haystack
+        (haystack', repl)   = replaceExpr check haystack
 
     return $ if repl > 0
         then Lam tmp haystack'
@@ -148,10 +148,10 @@ mkLambda typ needle haystack = do
 
 --------------------------------------------------------------------------------
 -- | Generate a fresh variable
-freshVar :: Type -> CoreM Var
-freshVar typ = do
+freshVar :: String -> Type -> RewriteM Var
+freshVar prefix typ = do
     unique <- Unique.getUniqueM
-    let occn = OccName.mkVarOcc $ "wm_" ++ show (Unique.getKey unique)
+    let occn = OccName.mkVarOcc $ prefix ++ "_" ++ show (Unique.getKey unique)
         name = Name.mkInternalName unique occn SrcLoc.noSrcSpan
         -- var  = Var.mkLocalVar IdInfo.VanillaId name typ IdInfo.vanillaIdInfo
         var  = Var.mkCoVar name typ
