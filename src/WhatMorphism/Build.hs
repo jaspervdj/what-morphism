@@ -16,7 +16,6 @@ import           Control.Applicative   (pure, (<$>), (<*>))
 import           Control.Monad         (forM)
 import           Control.Monad.Reader  (ReaderT, ask, runReaderT)
 import           Control.Monad.Trans   (lift)
-import           Control.Monad.Writer  (WriterT, runWriterT, tell)
 import           CoreSyn               (Bind (..), Expr (..))
 import qualified CoreSyn               as CoreSyn
 import           DataCon               (DataCon)
@@ -44,16 +43,32 @@ toBuild f body = do
     liftCoreM $ Outputable.pprTrace "rTyp" (Type.pprType rTyp) $ return ()
     conses        <- getDataCons rTyp
 
-    -- TODO: This run is not needed! But useful for now... in some way or
-    -- another.
-    (_, dataCons) <- runWriterT $ runReaderT (replace body) (BuildRead f [])
-
     -- Create a worker function 'g'. The type of 'g' is like the fixed type of
     -- 'f', but with a more general return type (TODO).
     let gTyp = snd $ Type.splitForAllTys (Var.varType f)
     g <- freshVar "g" gTyp
     let (fTyBinders, fValBinders, body') = CoreSyn.collectTyAndValBinders body
     newArgs <- forM fValBinders $ \arg -> freshVar "fArg" (Var.varType arg)
+
+    -- Get the build function, if available
+    build <- registeredBuild rTyp
+    liftCoreM $ Outputable.pprTrace "builType" (Type.pprType (Var.varType build)) $ return ()
+    (buildTyArgs, bTy, lamTy) <- liftMaybe "Build has no Fun Forall type" $ do
+        let (buildTyArgs, buildTy) = Type.splitForAllTys (Var.varType build)
+        (argTy, _)             <- Type.splitFunTy_maybe buildTy
+        (bTy, lamTy)           <- Type.splitForAllTy_maybe argTy
+        return (buildTyArgs, bTy, lamTy)
+
+    -- The types for the arguments of the lambda MUST EXACTLY MATCH the
+    -- different constructors of the datatype. This is EXTREMELY IMPORTANT.
+    -- However, we BLATANTLY DISREGARD checking this.
+    let (consTys, _) = Type.splitFunTys lamTy
+    lamArgs <- forM consTys (freshVar "cons")
+    let replacements = zip conses lamArgs
+
+    -- TODO: This run is not needed! But useful for now... in some way or
+    -- another.
+    _ <- runReaderT (replace body) (BuildRead f g replacements)
 
     let body'' =
             MkCore.mkCoreLams (fTyBinders ++ newArgs)
@@ -63,15 +78,16 @@ toBuild f body = do
 
     -- TODO: Figure out replacements
     -- TODO: Second run to replace them
-    message $ "DataCons: " ++ dump dataCons
+    -- message $ "DataCons: " ++ dump dataCons
     message $ "Conses: " ++ dump conses
     return body''
 
 
 --------------------------------------------------------------------------------
 data BuildRead = BuildRead
-    { buildVar          :: Var
-    , buildReplacements :: [(DataCon, Var)]
+    { buildVar            :: Var
+    , buildVarReplacement :: Var
+    , buildReplacements   :: [(DataCon, Var)]
     }
 
 
@@ -80,7 +96,7 @@ data BuildRead = BuildRead
 --
 -- - A list of used DataCon's
 -- - A function which allows replacement of these DataCon's by other expressions
-type Build a = ReaderT BuildRead (WriterT [DataCon] RewriteM) a
+type Build a = ReaderT BuildRead RewriteM a
 
 
 --------------------------------------------------------------------------------
@@ -98,7 +114,7 @@ replacementForDataCon original dataCon = do
 
 --------------------------------------------------------------------------------
 liftRewriteM :: RewriteM a -> Build a
-liftRewriteM = lift . lift
+liftRewriteM = lift
 
 
 --------------------------------------------------------------------------------
@@ -164,7 +180,6 @@ recursionOrReplaceDataCon e = do
                 return (e, [])
             | Var.isId var          -> case Var.idDetails var of
                 IdInfo.DataConWorkId dc -> do
-                    tell [dc]
                     replacement <- replacementForDataCon var dc
                     let ris = recursiveIndices dc
                     liftRewriteM $ message $ "Recursive indices for " ++

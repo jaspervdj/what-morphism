@@ -11,6 +11,7 @@ module WhatMorphism.RewriteM
     , liftMaybe'
     , message
     , registeredFold
+    , registeredBuild
     , isRegisteredFoldOrBuild
     ) where
 
@@ -160,6 +161,13 @@ registeredFold :: Type -> RewriteM Id
 registeredFold typ = do
     register <- registerFor typ
     lookupImportedString (registerFold register)
+
+
+--------------------------------------------------------------------------------
+registeredBuild :: Type -> RewriteM Id
+registeredBuild typ = do
+    register <- registerFor typ
+    lookupImportedString (registerBuild register)
 
 
 --------------------------------------------------------------------------------
