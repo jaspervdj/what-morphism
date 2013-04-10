@@ -60,7 +60,7 @@ toBuild f body = do
     -- Create a worker function 'g'. The type of 'g' is like the fixed type of
     -- 'f', but with a more general return type.
     --
-    -- TODO: This return type is just the our new 'b', right? Right? Guys?
+    -- TODO: This return type is just our new 'b', right? Right? Guys?
     let gTyArgs = fst $ Type.splitFunTys $ snd $ Type.splitForAllTys fTy
         gTy     = Type.mkFunTys gTyArgs (Type.mkTyVarTy bTy)
     g <- freshVar "g" gTy
