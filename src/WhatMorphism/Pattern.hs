@@ -12,7 +12,6 @@ import           Data.List             (find)
 import qualified MkCore                as MkCore
 import           Type                  (Type)
 import qualified Type                  as Type
-import qualified TysWiredIn            as TysWiredIn
 import           Var                   (Var)
 import qualified Var                   as Var
 
@@ -97,6 +96,8 @@ mkFold d rTyp alts = do
 
 
 --------------------------------------------------------------------------------
+-- This is (deprecated?) a version of 'mkFold' specific to [] lists.
+{-
 mkListFold :: Var
            -> Type
            -> [(AltCon, Expr Var)]
@@ -116,6 +117,7 @@ mkListFold d rTyp alts = do
 
     getAlt dataCon = liftMaybe ("No alt found for " ++ dump dataCon) $
         lookup (DataAlt dataCon) alts
+-}
 
 
 --------------------------------------------------------------------------------

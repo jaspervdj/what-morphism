@@ -38,8 +38,10 @@ import           WhatMorphism.SynEq
 --------------------------------------------------------------------------------
 toBuild :: Var -> Expr Var -> RewriteM (Expr Var)
 toBuild f body = do
-    -- Run to detect data constructors
-    let rTy     = guessFunctionReturnType (Var.varType f)
+    -- We need some info on our type, e.g. 'List'. We find this type by guessing
+    -- the return type of our function (real professionalism here).
+    let fTy     = Var.varType f
+        rTy     = guessFunctionReturnType fTy
         rTyArgs = case Type.splitTyConApp_maybe rTy of
                     Just (_, tyArgs) -> tyArgs
                     Nothing          -> []
@@ -48,7 +50,6 @@ toBuild f body = do
 
     -- Get the build function, if available
     build <- registeredBuild rTy
-    liftCoreM $ Outputable.pprTrace "buildType" (Type.pprType (Var.varType build)) $ return ()
     lamTy <- liftMaybe "Build has no Fun Forall type" $ do
         let (_, buildTy) = Type.splitForAllTys (Var.varType build)
         (argTy, _) <- Type.splitFunTy_maybe buildTy
@@ -57,8 +58,10 @@ toBuild f body = do
     bTy <- freshTyVar "bbb"
 
     -- Create a worker function 'g'. The type of 'g' is like the fixed type of
-    -- 'f', but with a more general return type (TODO).
-    let gTyArgs = fst $ Type.splitFunTys $ snd $ Type.splitForAllTys (Var.varType f)
+    -- 'f', but with a more general return type.
+    --
+    -- TODO: This return type is just the our new 'b', right? Right? Guys?
+    let gTyArgs = fst $ Type.splitFunTys $ snd $ Type.splitForAllTys fTy
         gTy     = Type.mkFunTys gTyArgs (Type.mkTyVarTy bTy)
     g <- freshVar "g" gTy
     let (fTyBinders, fValBinders, body') = CoreSyn.collectTyAndValBinders body
@@ -66,7 +69,7 @@ toBuild f body = do
 
     -- The types for the arguments of the lambda MUST EXACTLY MATCH the
     -- different constructors of the datatype. This is EXTREMELY IMPORTANT.
-    -- However, we BLATANTLY DISREGARD checking this.
+    -- However, we BLATANTLY DISREGARD checking this. #yolo
     let (consTys, _) = Type.splitFunTys lamTy
     lamArgs <- forM consTys (freshVar "cons")
     let replacements = zip conses lamArgs
@@ -74,24 +77,14 @@ toBuild f body = do
     -- TODO: This run is not needed! But useful for now... in some way or
     -- another.
     body'' <- runReaderT (replace body') (BuildRead f g replacements)
-
-    let fBody =
-            MkCore.mkCoreLams (fTyBinders ++ newArgs)
-                (App
-                    (MkCore.mkCoreApps (Var build) (map Type rTyArgs))
-                    (MkCore.mkCoreLams (bTy : lamArgs)
-                        (Let
-                            (Rec [(g, MkCore.mkCoreLams fValBinders body'')])
-                            (MkCore.mkCoreApps (Var g) (map Var newArgs)))))
-
-    -- Result
-    liftCoreM $ Outputable.pprTrace "fBody" (Outputable.ppr fBody) $ return ()
-
-    -- TODO: Figure out replacements
-    -- TODO: Second run to replace them
-    -- message $ "DataCons: " ++ dump dataCons
-    message $ "Conses: " ++ dump conses
-    return fBody
+    return $
+        MkCore.mkCoreLams (fTyBinders ++ newArgs)
+            (App
+                (MkCore.mkCoreApps (Var build) (map Type rTyArgs))
+                (MkCore.mkCoreLams (bTy : lamArgs)
+                    (Let
+                        (Rec [(g, MkCore.mkCoreLams fValBinders body'')])
+                        (MkCore.mkCoreApps (Var g) (map Var newArgs)))))
 
 
 --------------------------------------------------------------------------------
@@ -103,10 +96,6 @@ data BuildRead = BuildRead
 
 
 --------------------------------------------------------------------------------
--- | After we examine a function, we get two things:
---
--- - A list of used DataCon's
--- - A function which allows replacement of these DataCon's by other expressions
 type Build a = ReaderT BuildRead RewriteM a
 
 
@@ -117,6 +106,7 @@ replacementForDataCon original dataCon = do
     case lookup dataCon replacements of
         Just v  -> return v
         Nothing -> do
+            -- TODO: Shouldn't we fail here?
             liftRewriteM $ message $
                 "WhatMorphism.Build.replacementForDataCon: " ++
                 "No replacement for " ++ dump dataCon ++ ", using original"
@@ -158,11 +148,8 @@ replace (Coercion c) = return (Coercion c)
 
 
 --------------------------------------------------------------------------------
--- | TODO: We generally want to search for a DataCon OR recursion to our
--- function (needs to be added in Reader).
---
--- Also returns a list of recursiveIndices so we know what other places to
--- check...
+-- We generally want to search for a DataCon OR recursion to our function (needs
+-- to be added in Reader).
 recursionOrReplaceDataCon :: Expr Var -> Build (Expr Var)
 recursionOrReplaceDataCon expr = do
     recursionVar <- buildVar <$> ask
@@ -179,18 +166,6 @@ recursionOrReplaceDataCon expr = do
         (Lam x e) -> do
             e' <- recursionOrReplaceDataCon e
             return $ MkCore.mkCoreApps (Lam x e') args
-        {-
-        (App e' a)         -> do
-            (e'', ris) <- recursionOrReplaceDataCon e'
-            case ris of
-                []           -> return (App e'' a, ris)
-                (rec : ris') -> do
-                    liftRewriteM $ message $ "Checking App: " ++ show ris
-                    (a', _) <- if rec
-                        then recursionOrReplaceDataCon a
-                        else return (a, [])
-                    return (App e'' a', ris')
-        -}
         (Var var)
             | var .==. recursionVar -> do
                 replacement <- buildVarReplacement <$> ask
