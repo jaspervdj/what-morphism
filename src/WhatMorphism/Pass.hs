@@ -9,6 +9,9 @@ module WhatMorphism.Pass
 --------------------------------------------------------------------------------
 import           Control.Monad.Error   (catchError)
 import           CoreSyn
+import qualified Data.Generics.Schemes as Data
+import           Data.Typeable         (cast)
+import           Unsafe.Coerce         (unsafeCoerce)
 
 
 --------------------------------------------------------------------------------
@@ -26,7 +29,14 @@ whatMorphismPass = mapM whatMorphism
 
 --------------------------------------------------------------------------------
 whatMorphism :: CoreBind -> RewriteM CoreBind
-whatMorphism coreBind = do
+whatMorphism = Data.everywhereM $ \b -> case cast b of
+    Just cb -> whatMorphismBind cb >>= \cb' -> return (unsafeCoerce cb')
+    Nothing -> return b
+
+
+--------------------------------------------------------------------------------
+whatMorphismBind :: CoreBind -> RewriteM CoreBind
+whatMorphismBind coreBind = do
     coreBind' <- withBinds coreBind $ \f e -> do
         reg <- isRegisteredFoldOrBuild f
         if reg
