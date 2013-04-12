@@ -20,11 +20,12 @@ import           WhatMorphism.Dump
 import           WhatMorphism.Expr
 import           WhatMorphism.Pattern
 import           WhatMorphism.RewriteM
+import           WhatMorphism.RemoveRec
 
 
 --------------------------------------------------------------------------------
 whatMorphismPass :: [CoreBind] -> RewriteM [CoreBind]
-whatMorphismPass = mapM whatMorphism
+whatMorphismPass = fmap removeRec . mapM whatMorphism
 
 
 --------------------------------------------------------------------------------

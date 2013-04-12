@@ -25,6 +25,7 @@ Library
     WhatMorphism.Expr
     WhatMorphism.Pass
     WhatMorphism.Pattern
+    WhatMorphism.RemoveRec
     WhatMorphism.RewriteM
     WhatMorphism.SynEq
 
