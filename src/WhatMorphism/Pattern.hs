@@ -71,7 +71,7 @@ mkFold :: Var                   -- ^ Destructed thingy
        -> RewriteM (Expr Var)   -- ^ Resulting expression
 mkFold d rTyp alts = do
     fold   <- registeredFold (Var.varType d)
-    conses <- getDataCons (Var.varType d)
+    conses <- liftEither $ getDataCons (Var.varType d)
     fargs  <- mapM getAlt conses
     message $ "Conses: " ++ dump conses
     message $ "Our registered fold is: " ++ dump fold
@@ -130,7 +130,7 @@ rewriteAlt :: (Var -> Expr Var)
 rewriteAlt _ _ []       _    body = return body
 rewriteAlt f d (t : ts) rTyp body = do
     expr <- rewriteAlt f d ts rTyp body
-    if isRecursive
+    liftCoreM $ if isRecursive
         then mkLambda rTyp            (f t)   expr
         else mkLambda (Var.varType t) (Var t) expr
   where

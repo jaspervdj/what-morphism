@@ -9,10 +9,12 @@ module WhatMorphism.RewriteM
     , liftCoreM
     , liftMaybe
     , liftMaybe'
+    , liftEither
     , message
     , registeredFold
     , registeredBuild
     , isRegisteredFoldOrBuild
+    , registerForInlining
     ) where
 
 
@@ -23,6 +25,7 @@ import           Control.Monad            (ap)
 import           Control.Monad.Error      (MonadError (..))
 import           CoreMonad                (CoreM)
 import qualified CoreMonad                as CoreMonad
+import           CoreSyn                  (Expr)
 import           HscTypes                 (ModGuts)
 import qualified HscTypes                 as HscTypes
 import           Name                     (Name)
@@ -36,19 +39,21 @@ import           UniqFM                   (UniqFM)
 import qualified UniqFM                   as UniqFM
 import           UniqSupply               (MonadUnique (..))
 import qualified UniqSupply               as Unique
-import           Var                      (Id)
+import           Var                      (Id, Var)
 import qualified Var                      as Var
 
 
 --------------------------------------------------------------------------------
 import           WhatMorphism.Annotations
 import           WhatMorphism.Dump
+import           WhatMorphism.Inliner
 
 
 --------------------------------------------------------------------------------
 data RewriteRead = RewriteRead
     { rewriteModGuts  :: ModGuts
     , rewriteRegister :: UniqFM RegisterFoldBuild
+    , rewriteInliner  :: InlinerState
     }
 
 
@@ -135,6 +140,11 @@ liftMaybe' = liftMaybe "WhatMorphism.RewriteM.liftMaybe'"
 
 
 --------------------------------------------------------------------------------
+liftEither :: Either String a -> RewriteM a
+liftEither = RewriteM . const . return
+
+
+--------------------------------------------------------------------------------
 message :: String -> RewriteM ()
 message = liftCoreM . CoreMonad.putMsgS
 
@@ -217,3 +227,10 @@ isRegisteredFoldOrBuild id' = do
         [ n == OccName.occNameString (Name.nameOccName (Var.varName id'))
         | RegisterFoldBuild f b <- UniqFM.eltsUFM reg, n <- [f, b]
         ]
+
+
+--------------------------------------------------------------------------------
+registerForInlining :: Var -> Expr Var -> RewriteM ()
+registerForInlining v e = do
+    inliner <- rewriteInliner <$> rewriteAsk
+    liftCoreM $ CoreMonad.liftIO $ setNeedsInlining v e inliner

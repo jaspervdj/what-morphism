@@ -38,24 +38,20 @@ whatMorphism = Data.everywhereM $ \b -> case cast b of
 --------------------------------------------------------------------------------
 whatMorphismBind :: CoreBind -> RewriteM CoreBind
 whatMorphismBind coreBind = do
-    coreBind' <- withBinds coreBind $ \f e -> do
-        reg <- isRegisteredFoldOrBuild f
-        if reg
-            then return e
-            else do
-                message $ "====== toBuild: " ++ dump f
-                catchError (toBuild f e) $ \err -> do
-                    message $ "====== Error: " ++ err
-                    return e
-
-    coreBind'' <- withBinds coreBind' $ \f e -> do
-        reg <- isRegisteredFoldOrBuild f
-        if reg
-            then return e
-            else do
-                message $ "====== toFold: " ++ dump f
-                catchError (toFold f e) $ \err -> do
-                    message $ "====== Error: " ++ err
-                    return e
-
+    coreBind'  <- pass toBuild "toBuild" coreBind
+    coreBind'' <- pass toFold "toFold"   coreBind'
     return coreBind''
+  where
+    pass p name bind = withBinds bind $ \f e -> do
+        reg <- isRegisteredFoldOrBuild f
+        if reg
+            then return e
+            else do
+                message $ "====== " ++ name ++ ": " ++ dump f
+                flip catchError (report e) $ do
+                    e' <- p f e
+                    registerForInlining f e'
+                    return e'
+    report e err = do
+        message $ "====== Error: " ++ err
+        return e

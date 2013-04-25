@@ -22,6 +22,7 @@ module WhatMorphism.Expr
 import           Coercion                   (Coercion)
 import           Control.Monad              (forM, liftM)
 import           Control.Monad.State.Strict (State, modify, runState)
+import           CoreMonad                  (CoreM)
 import           CoreSyn
 import qualified Data.Generics.Schemes      as Data
 import           Data.Typeable              (cast)
@@ -41,7 +42,6 @@ import qualified Var                        as Var
 
 
 --------------------------------------------------------------------------------
-import           WhatMorphism.RewriteM
 import           WhatMorphism.SynEq
 
 
@@ -133,7 +133,7 @@ toVar _       = Nothing
 -- Becomes something like:
 --
 -- > (\tmp -> foo tmp + tmp) x
-mkLambda :: Type -> Expr Var -> Expr Var -> RewriteM (Expr Var)
+mkLambda :: Type -> Expr Var -> Expr Var -> CoreM (Expr Var)
 mkLambda typ needle haystack = do
     tmp <- freshVar "wm" typ
 
@@ -149,7 +149,7 @@ mkLambda typ needle haystack = do
 
 --------------------------------------------------------------------------------
 -- | Generate a fresh variable
-freshVar :: String -> Type -> RewriteM Var
+freshVar :: String -> Type -> CoreM Var
 freshVar prefix typ = do
     unique <- Unique.getUniqueM
     let occn = OccName.mkVarOcc $ prefix ++ "_" ++ show (Unique.getKey unique)
@@ -161,7 +161,7 @@ freshVar prefix typ = do
 
 --------------------------------------------------------------------------------
 -- | Generate a fresh variable
-freshTyVar :: String -> RewriteM TyVar
+freshTyVar :: String -> CoreM TyVar
 freshTyVar prefix = do
     unique <- Unique.getUniqueM
     let occn = OccName.mkTyVarOcc $ prefix ++ "_" ++ show (Unique.getKey unique)
@@ -211,8 +211,9 @@ guessFunctionReturnType = snd . Type.splitFunTys . snd . Type.splitForAllTys
 
 --------------------------------------------------------------------------------
 -- | This should return the datacons in the correct order!
-getDataCons :: Type -> RewriteM [DataCon]
+getDataCons :: Type -> Either String [DataCon]
 getDataCons typ = case Type.splitTyConApp_maybe typ of
-    Nothing      -> fail "getDataCons: type is no TyConApp?"
-    Just (tc, _) -> liftMaybe "No DataCon's found" $
-        TyCon.tyConDataCons_maybe tc
+    Nothing      -> Left "getDataCons: type is no TyConApp?"
+    Just (tc, _) -> case TyCon.tyConDataCons_maybe tc of
+        Nothing  -> Left "No DataCon's found"
+        Just dcs -> Right dcs

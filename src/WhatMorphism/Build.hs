@@ -46,7 +46,7 @@ toBuild f body = do
                     Just (_, tyArgs) -> tyArgs
                     Nothing          -> []
     liftCoreM $ Outputable.pprTrace "rTy" (Type.pprType rTy) $ return ()
-    conses <- getDataCons rTy
+    conses <- liftEither $ getDataCons rTy
 
     -- Get the build function, if available
     build <- registeredBuild rTy
@@ -55,7 +55,7 @@ toBuild f body = do
         (argTy, _) <- Type.splitFunTy_maybe buildTy
         (_, lamTy) <- Type.splitForAllTy_maybe argTy
         return lamTy
-    bTy <- freshTyVar "bbb"
+    bTy <- liftCoreM $ freshTyVar "bbb"
 
     -- Create a worker function 'g'. The type of 'g' is like the fixed type of
     -- 'f', but with a more general return type.
@@ -63,15 +63,16 @@ toBuild f body = do
     -- TODO: This return type is just our new 'b', right? Right? Guys?
     let gTyArgs = fst $ Type.splitFunTys $ snd $ Type.splitForAllTys fTy
         gTy     = Type.mkFunTys gTyArgs (Type.mkTyVarTy bTy)
-    g <- freshVar "g" gTy
+    g <- liftCoreM $ freshVar "g" gTy
     let (fTyBinders, fValBinders, body') = CoreSyn.collectTyAndValBinders body
-    newArgs <- forM fValBinders $ \arg -> freshVar "fArg" (Var.varType arg)
+    newArgs <- liftCoreM $
+        forM fValBinders $ \arg -> freshVar "fArg" (Var.varType arg)
 
     -- The types for the arguments of the lambda MUST EXACTLY MATCH the
     -- different constructors of the datatype. This is EXTREMELY IMPORTANT.
     -- However, we BLATANTLY DISREGARD checking this. #yolo
     let (consTys, _) = Type.splitFunTys lamTy
-    lamArgs <- forM consTys (freshVar "cons")
+    lamArgs <- liftCoreM $ forM consTys (freshVar "cons")
     let replacements = zip conses lamArgs
 
     -- TODO: This run is not needed! But useful for now... in some way or
