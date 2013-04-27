@@ -9,7 +9,6 @@ module WhatMorphism.Expr
     , toVar
     , mkLambda
     , freshVar
-    , freshTyVar
     , binds
     , withBinds
     , foldExpr
@@ -33,7 +32,7 @@ import qualified Name                       as Name
 import qualified OccName                    as OccName
 import qualified SrcLoc                     as SrcLoc
 import qualified TyCon                      as TyCon
-import           Type                       (TyVar, Type)
+import           Type                       (Type)
 import qualified Type                       as Type
 import qualified UniqSupply                 as Unique
 import qualified Unique                     as Unique
@@ -157,18 +156,6 @@ freshVar prefix typ = do
         name = Name.mkInternalName unique occn SrcLoc.noSrcSpan
         -- var  = Var.mkLocalVar IdInfo.VanillaId name typ IdInfo.vanillaIdInfo
         var  = Var.mkCoVar name typ
-    return var
-
-
---------------------------------------------------------------------------------
--- | Generate a fresh variable
-freshTyVar :: String -> CoreM TyVar
-freshTyVar prefix = do
-    unique <- Unique.getUniqueM
-    let occn = OccName.mkTyVarOcc $ prefix ++ "_" ++ show (Unique.getKey unique)
-        name = Name.mkInternalName unique occn SrcLoc.noSrcSpan
-        -- var  = Var.mkLocalVar IdInfo.VanillaId name typ IdInfo.vanillaIdInfo
-        var  = Var.mkCoVar name Type.anyKind
     return var
 
 

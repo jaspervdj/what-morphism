@@ -57,7 +57,6 @@ toBuild f body = do
         return lamTy
     let (_, lamReTy) = Type.splitFunTys lamTy
     lamReTyVar <- liftMaybe "lamRe is no TyVar" $ Type.getTyVar_maybe lamReTy
-    bTy <- liftCoreM $ freshTyVar "bbb"
 
     -- Create a worker function 'g'. The type of 'g' is like the fixed type of
     -- 'f', but with a more general return type.
