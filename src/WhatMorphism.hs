@@ -12,6 +12,7 @@ import qualified Serialized            as Serialized
 
 
 --------------------------------------------------------------------------------
+import           WhatMorphism.Fusion
 import           WhatMorphism.Inliner
 import           WhatMorphism.Pass
 import           WhatMorphism.RewriteM
@@ -31,17 +32,19 @@ installWhatMorphism _args todos = do
     inliner <- CoreMonad.liftIO newInlinerState
     return $ intersperse
         (CoreDoPasses
-            [ CoreDoPluginPass "WhatMorphism" (whatMorphism inliner)
+            [ CoreDoPluginPass "WhatMorphism"
+                (runRewritePass whatMorphismPass inliner)
             , CoreDoPluginPass "WhatMorphism.Inliner" (inline inliner)
+            -- , CoreDoPluginPass "WhatMorphism.Fusion"
+                -- (runRewritePass fusePass inliner)
             ] )
         todos
   where
-    whatMorphism inliner mg = do
+    runRewritePass pass inliner mg = do
         register  <- CoreMonad.getFirstAnnotations
             Serialized.deserializeWithData mg
-
-        mg_binds' <- runRewriteM (whatMorphismPass $ mg_binds mg)
-            (RewriteRead mg register inliner)
+        mg_binds' <- runRewriteM (pass $ mg_binds mg)
+            (mkRewriteRead mg register inliner)
         case mg_binds' of
             Left err     -> do
                 CoreMonad.putMsgS $ "Pass failed: " ++ err

@@ -16,7 +16,6 @@ import           Data.IORef          (IORef, modifyIORef, newIORef, readIORef)
 import           Data.Map            (Map)
 import qualified Data.Map            as M
 import           Var                 (Var)
-import Debug.Trace
 
 
 --------------------------------------------------------------------------------
@@ -71,7 +70,7 @@ inline needsInlining expr = case CoreSyn.collectArgs expr of
     (Var v, args) -> do
         template <- M.lookup v needsInlining
         guard $ length args >= inlinerArity template
-        trace "INLINING SHIZZLE!" $ return $ foldl
+        return $ foldl
             (\e (a, ta) -> let (e', _) = replaceExpr (replaceArg ta a) e in e')
             (inlinerExpr template)
             (zip args $ inlinerArgs template)

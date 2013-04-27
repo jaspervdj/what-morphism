@@ -23,6 +23,7 @@ Library
     WhatMorphism.DirectedGraph
     WhatMorphism.Dump
     WhatMorphism.Expr
+    WhatMorphism.Fusion
     WhatMorphism.Inliner
     WhatMorphism.Pass
     WhatMorphism.Pattern

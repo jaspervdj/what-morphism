@@ -1,112 +1,110 @@
 --------------------------------------------------------------------------------
-{-# LANGUAGE ScopedTypeVariables #-}
 module WhatMorphism.Fusion
-    ( foldFoldFusion
-    , listFoldSpec
+    ( fusePass
     ) where
 
 
 --------------------------------------------------------------------------------
-import           Control.Applicative   (pure, (<$>), (<*>))
-import           Control.Monad.State   (StateT, evalStateT, get, modify)
-import           Control.Monad.Trans   (lift)
-import           CoreSyn
-import           Data.Maybe            (maybeToList)
-import qualified PrelNames             as PrelNames
+import           Control.Monad         (forM, unless)
+import           Control.Monad.Error   (catchError)
+import           CoreSyn               (CoreBind, Expr (..))
+import qualified CoreSyn               as CoreSyn
+import qualified Data.Generics         as Data
+import qualified Data.Generics.Schemes as Data
+import           Data.Typeable         (cast)
+import qualified MkCore                as MkCore
+import qualified Outputable            as Outputable
 import           Type                  (Type)
+import qualified Type                  as Type
+import           Unsafe.Coerce         (unsafeCoerce)
 import           Var                   (Var)
 import qualified Var                   as Var
 
 
 --------------------------------------------------------------------------------
-import           WhatMorphism.Dump
 import           WhatMorphism.Expr
 import           WhatMorphism.RewriteM
-import           WhatMorphism.SynEq
 
 
 --------------------------------------------------------------------------------
-foldFoldFusion :: Expr Var -> RewriteM (Expr Var)
-foldFoldFusion = rewriteBranch [] $ \expr -> do
-    let mspec = listFoldSpec expr
-    modify $ \s -> maybeToList mspec ++ s
-    _numSpecs <- length <$> get
-    case mspec of
-        Nothing -> return ()
-        Just s  -> lift $ message $ "foldFoldFusion: " ++ dump s
-    return expr
+fusePass :: [CoreBind] -> RewriteM [CoreBind]
+fusePass = mapM $ \b -> withBinds b $ \_ ->
+    Data.everywhereM $ \e -> case cast e of
+        Just e' -> unsafeCoerce $ catchError (fuse e') (const $ return e')
+        Nothing -> return e
 
 
 --------------------------------------------------------------------------------
-data FoldSpec = FoldSpec
-    { foldFunction   :: Var
-    , foldReturnType :: Type
-    , foldAlgebra    :: [Expr Var]
-    , foldDestroys   :: Expr Var
-    }
+fuse :: Expr Var -> RewriteM (Expr Var)
+fuse expr@(App _ _) = case CoreSyn.collectArgs expr of
+    (Var fold, fArgs) -> do
+        fReg <- isRegisteredFold fold
+        unless fReg $ fail "Not a registered fold"
+        let foldTy                   = Var.varType fold
+            (foldForAllTys, foldTy') = Type.splitForAllTys foldTy
+            (foldArgTys, foldReTy)   = Type.splitFunTys foldTy'
+        foldDesTyCon <- liftMaybe "No TyCon App" $
+            Type.tyConAppTyCon_maybe (last foldArgTys)
+        unless (length foldForAllTys + length foldArgTys == length fArgs) $
+            fail "Incorrect arity..."
+        let buildExpr = last fArgs
+        liftCoreM $
+            Outputable.pprTrace "fArgs" (Outputable.ppr fArgs) $ return ()
+        liftCoreM $
+            Outputable.pprTrace "foldForAllTys" (Outputable.ppr foldForAllTys) $ return ()
+        liftCoreM $
+            Outputable.pprTrace "foldArgTys" (Outputable.ppr foldArgTys) $ return ()
+        liftCoreM $
+            Outputable.pprTrace "relevant args" (Outputable.ppr $
+                    drop (length foldForAllTys) (init fArgs)
+                ) $ return ()
+        case CoreSyn.collectArgs buildExpr of
+            (Var build, bArgs) -> do
+                bReg <- isRegisteredBuild build
+                unless bReg $ fail "Not a registered build"
+                let (bExtraArgs, bLambda) = (init bArgs, last bArgs)
+                bForAllArgs <- forM bExtraArgs $ \a -> case a of
+                    Type t -> return t
+                    _      -> fail "bExtraArgs not a type"
+
+                liftCoreM $
+                    Outputable.pprTrace "foldDesTyCon" (Outputable.ppr $
+                            foldDesTyCon
+                        ) $ return ()
+                liftCoreM $
+                    Outputable.pprTrace "bForAllArgs" (Outputable.ppr $
+                            bForAllArgs
+                        ) $ return ()
+                bLambda' <- specialize
+                    (Type.mkTyConApp foldDesTyCon bForAllArgs) bLambda
+                liftCoreM $
+                    Outputable.pprTrace "bLambda" (Outputable.ppr $
+                            bLambda'
+                        ) $ return ()
+                return $ MkCore.mkCoreApps bLambda $
+                    (Type foldReTy) :
+                    drop (length foldForAllTys) (init fArgs)
+            _ -> fail "No fold inside build"
+
+    _ -> fail "No var app"
+fuse _ = fail "No App"
 
 
 --------------------------------------------------------------------------------
-instance Dump FoldSpec where
-    dump (FoldSpec f r a d) =
-        "(FoldSpec " ++ unwords [dump f, dump r, dump a, dump d] ++ ")"
-
-
---------------------------------------------------------------------------------
-isFusable :: FoldSpec -> FoldSpec -> Bool
-isFusable fs1 fs2 =
-    foldFunction fs1 .==. foldFunction fs2 &&
-    foldDestroys fs1 .==. foldDestroys fs2
-
-
---------------------------------------------------------------------------------
-listFoldSpec :: Expr Var -> Maybe FoldSpec
-
-listFoldSpec (App (App (App (App (App (Var foldrVar) _) rTyp) cons) nilF) d)
-    | Var.varName foldrVar /= PrelNames.foldrName = Nothing
-    | otherwise                                   = do
-        rTyp' <- fromType rTyp
-        return FoldSpec
-            { foldFunction   = foldrVar
-            , foldReturnType = rTyp'
-            , foldAlgebra    = [cons, nilF]
-            , foldDestroys   = d
-            }
+-- | Specialize a function in the form of
+--
+-- > \b :: AnyK a1 a2 ... -> foo :: b
+--
+-- with a concrete type, so we get
+--
+-- > \b :: a1 a2 ... -> foo :: [Int]
+specialize :: Type -> Expr Var -> RewriteM (Expr Var)
+specialize ty (Lam b expr) = return $ Data.everywhere sub expr
   where
-    fromType (Type t) = Just t
-    fromType _        = Nothing
-
-listFoldSpec _                                      = Nothing
-
-
---------------------------------------------------------------------------------
-rewriteBranch :: forall s.
-                 s                                           -- ^ Initial state
-              -> (Expr Var -> StateT s RewriteM (Expr Var))  -- ^ Rewrite
-              -> Expr Var                                    -- ^ Input
-              -> RewriteM (Expr Var)                         -- ^ Result
-rewriteBranch initial f expr = evalStateT (go expr) initial
-  where
-    -- Rewrite with a resetted state
-    local :: Expr Var -> StateT s RewriteM (Expr Var)
-    local x = lift $ evalStateT (go x) initial
-
-    -- Note how we use local for Lam and Case
-    go :: Expr Var -> StateT s RewriteM (Expr Var)
-    go (Var x)           = f (Var x)
-    go (Lit x)           = f (Lit x)
-    go (App x y)         = f =<< App <$> go x <*> go y
-    go (Lam x y)         = f =<< Lam x <$> local y
-    go (Let x y)         = f =<< Let <$> withBinds x (\_ e -> f e) <*> go y
-    go (Case x y t alts) = f =<<
-        Case <$> go x <*> pure y <*> pure t <*> mapM goAlt alts
-    go (Cast x c)        = f =<< Cast <$> go x <*> pure c
-    go (Tick t y)        = f =<< Tick <$> pure t <*> go y
-    go (Type t)          = f (Type t)
-    go (Coercion c)      = f (Coercion c)
-
-    -- This is always local
-    goAlt :: Alt Var -> StateT s RewriteM (Alt Var)
-    goAlt (ac, bs, expr) = do
-        expr' <- local expr
-        return (ac, bs, expr')
+    bTy   = Type.mkTyVarTy b
+    sub x = case cast x of
+        Nothing                 -> x
+        Just t
+            | Type.eqType bTy t -> unsafeCoerce ty
+            | otherwise         -> x
+specialize _ _ = fail $ "Can't specialize stuff like this."

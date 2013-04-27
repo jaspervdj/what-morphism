@@ -4,6 +4,7 @@
 {-# LANGUAGE TypeSynonymInstances  #-}
 module WhatMorphism.RewriteM
     ( RewriteRead (..)
+    , mkRewriteRead
     , RewriteM
     , runRewriteM
     , liftCoreM
@@ -13,6 +14,8 @@ module WhatMorphism.RewriteM
     , message
     , registeredFold
     , registeredBuild
+    , isRegisteredFold
+    , isRegisteredBuild
     , isRegisteredFoldOrBuild
     , registerForInlining
     ) where
@@ -21,11 +24,13 @@ module WhatMorphism.RewriteM
 --------------------------------------------------------------------------------
 import           Control.Applicative      (Alternative (..), Applicative (..),
                                            (<$>))
-import           Control.Monad            (ap)
+import           Control.Monad            (ap, liftM2)
 import           Control.Monad.Error      (MonadError (..))
 import           CoreMonad                (CoreM)
 import qualified CoreMonad                as CoreMonad
 import           CoreSyn                  (Expr)
+import           Data.Set                 (Set)
+import qualified Data.Set                 as S
 import           HscTypes                 (ModGuts)
 import qualified HscTypes                 as HscTypes
 import           Name                     (Name)
@@ -40,12 +45,12 @@ import qualified UniqFM                   as UniqFM
 import           UniqSupply               (MonadUnique (..))
 import qualified UniqSupply               as Unique
 import           Var                      (Id, Var)
-import qualified Var                      as Var
 
 
 --------------------------------------------------------------------------------
 import           WhatMorphism.Annotations
 import           WhatMorphism.Dump
+import           WhatMorphism.Expr
 import           WhatMorphism.Inliner
 
 
@@ -54,7 +59,24 @@ data RewriteRead = RewriteRead
     { rewriteModGuts  :: ModGuts
     , rewriteRegister :: UniqFM RegisterFoldBuild
     , rewriteInliner  :: InlinerState
+    , rewriteBuilds   :: Set String
+    , rewriteFolds    :: Set String
     }
+
+
+--------------------------------------------------------------------------------
+mkRewriteRead :: ModGuts -> UniqFM RegisterFoldBuild -> InlinerState
+              -> RewriteRead
+mkRewriteRead mg rg inliner = RewriteRead
+    { rewriteModGuts  = mg
+    , rewriteRegister = rg
+    , rewriteInliner  = inliner
+    , rewriteBuilds   = bs
+    , rewriteFolds    = fs
+    }
+  where
+    fs = S.fromList [f | RegisterFoldBuild f _ <- UniqFM.eltsUFM rg]
+    bs = S.fromList [b | RegisterFoldBuild _ b <- UniqFM.eltsUFM rg]
 
 
 --------------------------------------------------------------------------------
@@ -218,15 +240,25 @@ lookupGlobalRdrEnv env oname =
 
 
 --------------------------------------------------------------------------------
+isRegisteredFold :: Id -> RewriteM Bool
+isRegisteredFold id' = do
+    folds <- rewriteFolds <$> rewriteAsk
+    return $ idBaseName id' `S.member` folds
+
+
+--------------------------------------------------------------------------------
+isRegisteredBuild :: Id -> RewriteM Bool
+isRegisteredBuild id' = do
+    builds <- rewriteBuilds <$> rewriteAsk
+    return $ idBaseName id' `S.member` builds
+
+
+--------------------------------------------------------------------------------
 -- | Warning!!! TODO REMOVE ME
 isRegisteredFoldOrBuild :: Id -> RewriteM Bool
 isRegisteredFoldOrBuild id' = do
     message $ "Checking " ++ dump id'
-    reg <- rewriteRegister <$> rewriteAsk
-    return $ or
-        [ n == OccName.occNameString (Name.nameOccName (Var.varName id'))
-        | RegisterFoldBuild f b <- UniqFM.eltsUFM reg, n <- [f, b]
-        ]
+    liftM2 (||) (isRegisteredFold id') (isRegisteredBuild id')
 
 
 --------------------------------------------------------------------------------

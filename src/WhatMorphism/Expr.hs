@@ -15,6 +15,7 @@ module WhatMorphism.Expr
     , foldExpr
     , guessFunctionReturnType
     , getDataCons
+    , idBaseName
     ) where
 
 
@@ -217,3 +218,8 @@ getDataCons typ = case Type.splitTyConApp_maybe typ of
     Just (tc, _) -> case TyCon.tyConDataCons_maybe tc of
         Nothing  -> Left "No DataCon's found"
         Just dcs -> Right dcs
+
+
+--------------------------------------------------------------------------------
+idBaseName :: Id -> String
+idBaseName = OccName.occNameString . Name.nameOccName . Var.varName

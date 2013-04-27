@@ -55,6 +55,8 @@ toBuild f body = do
         (argTy, _) <- Type.splitFunTy_maybe buildTy
         (_, lamTy) <- Type.splitForAllTy_maybe argTy
         return lamTy
+    let (_, lamReTy) = Type.splitFunTys lamTy
+    lamReTyVar <- liftMaybe "lamRe is no TyVar" $ Type.getTyVar_maybe lamReTy
     bTy <- liftCoreM $ freshTyVar "bbb"
 
     -- Create a worker function 'g'. The type of 'g' is like the fixed type of
@@ -62,7 +64,7 @@ toBuild f body = do
     --
     -- TODO: This return type is just our new 'b', right? Right? Guys?
     let gTyArgs = fst $ Type.splitFunTys $ snd $ Type.splitForAllTys fTy
-        gTy     = Type.mkFunTys gTyArgs (Type.mkTyVarTy bTy)
+        gTy     = Type.mkFunTys gTyArgs lamReTy
     g <- liftCoreM $ freshVar "g" gTy
     let (fTyBinders, fValBinders, body') = CoreSyn.collectTyAndValBinders body
     newArgs <- liftCoreM $
@@ -82,7 +84,7 @@ toBuild f body = do
         MkCore.mkCoreLams (fTyBinders ++ newArgs)
             (App
                 (MkCore.mkCoreApps (Var build) (map Type rTyArgs))
-                (MkCore.mkCoreLams (bTy : lamArgs)
+                (MkCore.mkCoreLams (lamReTyVar : lamArgs)
                     (Let
                         (Rec [(g, MkCore.mkCoreLams fValBinders body'')])
                         (MkCore.mkCoreApps (Var g) (map Var newArgs)))))
