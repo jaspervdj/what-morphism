@@ -51,6 +51,7 @@ import           Var                      (Id, Var)
 import           WhatMorphism.Annotations
 import           WhatMorphism.Dump
 import           WhatMorphism.Expr
+import           WhatMorphism.HaskellList
 import           WhatMorphism.Inliner
 
 
@@ -69,14 +70,15 @@ mkRewriteRead :: ModGuts -> UniqFM RegisterFoldBuild -> InlinerState
               -> RewriteRead
 mkRewriteRead mg rg inliner = RewriteRead
     { rewriteModGuts  = mg
-    , rewriteRegister = rg
+    , rewriteRegister = rg'
     , rewriteInliner  = inliner
     , rewriteBuilds   = bs
     , rewriteFolds    = fs
     }
   where
-    fs = S.fromList [f | RegisterFoldBuild f _ <- UniqFM.eltsUFM rg]
-    bs = S.fromList [b | RegisterFoldBuild _ b <- UniqFM.eltsUFM rg]
+    rg' = rg `UniqFM.plusUFM` haskellListRegister
+    fs  = S.fromList [f | RegisterFoldBuild f _ <- UniqFM.eltsUFM rg]
+    bs  = S.fromList [b | RegisterFoldBuild _ b <- UniqFM.eltsUFM rg]
 
 
 --------------------------------------------------------------------------------

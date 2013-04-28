@@ -16,6 +16,7 @@ Library
   Exposed-modules:
     WhatMorphism
     WhatMorphism.Annotations
+    WhatMorphism.HaskellList
     WhatMorphism.TemplateHaskell
 
   Other-modules:
