@@ -24,10 +24,10 @@ Library
     WhatMorphism.DirectedGraph
     WhatMorphism.Dump
     WhatMorphism.Expr
+    WhatMorphism.Fold
     WhatMorphism.Fusion
     WhatMorphism.Inliner
     WhatMorphism.Pass
-    WhatMorphism.Pattern
     WhatMorphism.RemoveRec
     WhatMorphism.RewriteM
     WhatMorphism.SynEq
@@ -37,5 +37,5 @@ Library
     containers       >= 0.3 && < 0.6,
     ghc              >= 7.6 && < 7.7,
     mtl              >= 2.1 && < 2.2,
-    syb              >= 0.3 && < 0.4,
+    syb              >= 0.3 && < 0.5,
     template-haskell >= 2.8 && < 2.9

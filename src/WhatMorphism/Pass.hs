@@ -7,20 +7,20 @@ module WhatMorphism.Pass
 
 
 --------------------------------------------------------------------------------
-import           Control.Monad.Error   (catchError)
+import           Control.Monad.Error    (catchError)
 import           CoreSyn
-import qualified Data.Generics.Schemes as Data
-import           Data.Typeable         (cast)
-import           Unsafe.Coerce         (unsafeCoerce)
+import qualified Data.Generics.Schemes  as Data
+import           Data.Typeable          (cast)
+import           Unsafe.Coerce          (unsafeCoerce)
 
 
 --------------------------------------------------------------------------------
 import           WhatMorphism.Build
 import           WhatMorphism.Dump
 import           WhatMorphism.Expr
-import           WhatMorphism.Pattern
-import           WhatMorphism.RewriteM
+import           WhatMorphism.Fold
 import           WhatMorphism.RemoveRec
+import           WhatMorphism.RewriteM
 
 
 --------------------------------------------------------------------------------
