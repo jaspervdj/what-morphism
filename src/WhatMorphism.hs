@@ -34,9 +34,9 @@ installWhatMorphism _args todos = do
         (CoreDoPasses
             [ CoreDoPluginPass "WhatMorphism"
                 (runRewritePass whatMorphismPass inliner)
-            , CoreDoPluginPass "WhatMorphism.Inliner" (inline inliner)
-            , CoreDoPluginPass "WhatMorphism.Fusion"
-                (runRewritePass fusePass inliner)
+            -- , CoreDoPluginPass "WhatMorphism.Inliner" (inline inliner)
+            -- , CoreDoPluginPass "WhatMorphism.Fusion"
+                -- (runRewritePass fusePass inliner)
             ] )
         todos
   where

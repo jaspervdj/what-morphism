@@ -39,7 +39,8 @@ fuse expr@(App _ _) = case CoreSyn.collectArgs expr of
         unless fReg $ fail "Not a registered fold"
         let foldTy                   = Var.varType fold
             (foldForAllTys, foldTy') = Type.splitForAllTys foldTy
-            (foldArgTys, foldReTy)   = Type.splitFunTys foldTy'
+            (foldArgTys, _foldReTy)  = Type.splitFunTys foldTy'
+            foldConcreteReTy         = last $ take (length foldForAllTys) fArgs
         unless (length foldForAllTys + length foldArgTys == length fArgs) $
             fail "Incorrect arity..."
         let buildExpr = last fArgs
@@ -54,7 +55,7 @@ fuse expr@(App _ _) = case CoreSyn.collectArgs expr of
                     _      -> fail "bExtraArgs not a type"
                 -}
                 return $ MkCore.mkCoreApps bLambda $
-                    (Type foldReTy) :
+                    foldConcreteReTy :
                     drop (length foldForAllTys) (init fArgs)
             _ -> fail "No fold inside build"
 
