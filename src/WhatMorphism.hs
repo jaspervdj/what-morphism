@@ -17,6 +17,7 @@ import           WhatMorphism.Fold
 import           WhatMorphism.Fusion
 import           WhatMorphism.Inliner
 import           WhatMorphism.RewriteM
+import           WhatMorphism.Types
 
 
 --------------------------------------------------------------------------------
@@ -27,27 +28,40 @@ plugin = defaultPlugin
 
 
 --------------------------------------------------------------------------------
+-- | CHANGE ME
+whatMorphismMode :: WhatMorphismMode
+whatMorphismMode = WhatMorphismFull
+
+
+--------------------------------------------------------------------------------
 installWhatMorphism :: [CommandLineOption] -> [CoreToDo] -> CoreM [CoreToDo]
 installWhatMorphism _args todos = do
     reinitializeGlobals
     inliner <- CoreMonad.liftIO newInlinerState
-    return $ intersperse
-        (CoreDoPasses
-            [ CoreDoPluginPass "WhatMorphism.Build"
-                (runRewritePass buildPass inliner)
-            , CoreDoPluginPass "WhatMorphism.Fold"
-                (runRewritePass foldPass inliner)
-            , CoreDoPluginPass "WhatMorphism.Inliner" (inline inliner)
-            , CoreDoPluginPass "WhatMorphism.Fusion"
-                (runRewritePass fusePass inliner)
-            ] )
-        todos
+
+    let passes
+            | whatMorphismMode == WhatMorphismQuick =
+                [ CoreDoPluginPass "WhatMorphism.Fold"
+                    (runRewritePass foldPass inliner)
+                ]
+
+            | otherwise                             =
+                [ CoreDoPluginPass "WhatMorphism.Build"
+                    (runRewritePass buildPass inliner)
+                , CoreDoPluginPass "WhatMorphism.Fold"
+                    (runRewritePass foldPass inliner)
+                , CoreDoPluginPass "WhatMorphism.Inliner" (inline inliner)
+                , CoreDoPluginPass "WhatMorphism.Fusion"
+                    (runRewritePass fusePass inliner)
+                ]
+
+    return $ intersperse (CoreDoPasses passes) todos
   where
     runRewritePass pass inliner mg = do
         register  <- CoreMonad.getFirstAnnotations
             Serialized.deserializeWithData mg
         mg_binds' <- runRewriteM (pass $ mg_binds mg)
-            (mkRewriteRead mg register inliner)
+            (mkRewriteRead whatMorphismMode mg register inliner)
         case mg_binds' of
             Left err     -> do
                 CoreMonad.putMsgS $ "Pass failed: " ++ err

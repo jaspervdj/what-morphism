@@ -14,6 +14,8 @@ import           Name      (Name)
 import qualified Name      as Name
 import           OccName   (OccName)
 import qualified OccName   as OccName
+import           TyCon     (TyCon)
+import qualified TyCon     as TyCon
 import           TypeRep   (Type)
 import           Var       (Var)
 import qualified Var       as Var
@@ -64,6 +66,11 @@ instance Dump Var where
 --------------------------------------------------------------------------------
 instance Dump DataCon where
     dump = OccName.occNameString . Name.getOccName
+
+
+--------------------------------------------------------------------------------
+instance Dump TyCon where
+    dump tc = "@" ++ dump (TyCon.tyConName tc)
 
 
 --------------------------------------------------------------------------------

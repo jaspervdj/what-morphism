@@ -7,7 +7,7 @@ module WhatMorphism.Fold
 
 --------------------------------------------------------------------------------
 import           Control.Applicative    ((<|>))
-import           Control.Monad          (forM, mplus)
+import           Control.Monad          (forM, mplus, when)
 import           Control.Monad.Error    (catchError)
 import           CoreSyn
 import           Data.List              (find)
@@ -30,10 +30,13 @@ foldPass :: [CoreBind] -> RewriteM [CoreBind]
 foldPass = fmap removeRec . mapM foldPass'
   where
     foldPass' = withBindsEverywhere $ \cb -> withBinds cb $ \f e -> do
-        reg <- isRegisteredFoldOrBuild f
-        if reg
-            then return e
-            else do
+        reg    <- isRegisteredFoldOrBuild f
+        quick  <- isQuickMode
+        inline <- isRegisteredForInlining f
+        case (reg, quick, inline) of
+            (True, _,    _)    -> return e
+            (_,    True, True) -> return e
+            _                  -> do
                 message $ "====== toFold: " ++ dump f
                 flip catchError (report e) $ do
                     e' <- toFold f e
@@ -48,42 +51,51 @@ foldPass = fmap removeRec . mapM foldPass'
 toFold :: Var -> Expr Var -> RewriteM (Expr Var)
 toFold f body = do
     message $ "Starting with: " ++ dump body
-    toFold' (Var f) id body
+    toFold' f (Var f) id body
 
 
 --------------------------------------------------------------------------------
-toFold' :: Expr Var
+toFold' :: Var
+        -> Expr Var
         -> (Expr Var -> Expr Var)
         -> Expr Var
         -> RewriteM (Expr Var)
-toFold' f mkF (Lam x body) =
-    toFoldOver (\t -> App f (Var t)) (\e -> mkF (Lam x e)) x body <|>
-    toFold' (App f (Var x)) (\e -> mkF (Lam x e)) body
-toFold' _ _   _            = fail "No top-level Lam"
+toFold' f ef mkF (Lam x body) =
+    toFoldOver f (\t -> App ef (Var t)) (\e -> mkF (Lam x e)) x body <|>
+    toFold' f (App ef (Var x)) (\e -> mkF (Lam x e)) body
+toFold' _ _  _   _            = fail "No top-level Lam"
 
 
 --------------------------------------------------------------------------------
-toFoldOver :: (Var -> Expr Var)
+toFoldOver :: Var
+           -> (Var -> Expr Var)
            -> (Expr Var -> Expr Var)
            -> Var
            -> Expr Var
            -> RewriteM (Expr Var)
-toFoldOver f mkF d (Lam x body) =
-    toFoldOver (\t -> App (f t) (Var x)) (\e -> mkF (Lam x e)) d body
-toFoldOver f mkF d (Case (Var x) _ rTyp alts)
+toFoldOver f ef mkF d (Lam x body) =
+    toFoldOver f (\t -> App (ef t) (Var x)) (\e -> mkF (Lam x e)) d body
+toFoldOver f ef mkF d (Case (Var x) _ rTyp alts)
     | x == d                    = do
         alts' <- forM alts $ \(ac, bnds, expr) -> do
             message $ "Rewriting AltCon " ++ dump ac
             message $ "Was: " ++ dump expr
-            expr' <- rewriteAlt f d bnds rTyp expr
+            (expr', rec) <- rewriteAlt ef d bnds rTyp expr
             message $ "Now: " ++ dump expr'
             assertWellScoped (x : bnds) expr'
-            return (ac, expr')
+            return ((ac, expr'), rec)
         -- fold <- mkListFold d rTyp alts'
-        fold <- mkFold d rTyp alts'
+
+        when (or $ map snd alts') $
+            case Type.splitTyConApp_maybe (Var.varType d) of
+                Nothing      -> return ()
+                Just (tc, _) -> message $
+                    "FoldDetect: " ++ dump f ++ ", " ++ dump tc
+
+        fold <- mkFold d rTyp (map fst alts')
         return $ mkF fold
     | otherwise                 = fail "Wrong argument destructed"
-toFoldOver _ _ _ _              = fail "No top-level Case"
+toFoldOver _ _ _ _ _            = fail "No top-level Case"
 
 
 --------------------------------------------------------------------------------
@@ -148,13 +160,15 @@ rewriteAlt :: (Var -> Expr Var)
            -> [Var]
            -> Type
            -> Expr Var
-           -> RewriteM (Expr Var)
-rewriteAlt _ _ []       _    body = return body
-rewriteAlt f d (t : ts) rTyp body = do
-    expr <- rewriteAlt f d ts rTyp body
-    liftCoreM $ if isRecursive
-        then mkLambda rTyp            (f t)   expr
+           -> RewriteM (Expr Var, Bool)  -- ^ Rewriten expr, any recursive
+rewriteAlt _  _ []       _    body = return (body, False)
+rewriteAlt ef d (t : ts) rTyp body = do
+    (expr, rec) <- rewriteAlt ef d ts rTyp body
+    expr'       <- liftCoreM $ if isRecursive
+        then mkLambda rTyp            (ef t)   expr
         else mkLambda (Var.varType t) (Var t) expr
+
+    return (expr', rec || isRecursive)
   where
     isRecursive = Var.varType t `Type.eqType` Var.varType d
 

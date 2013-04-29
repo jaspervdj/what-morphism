@@ -30,6 +30,7 @@ Library
     WhatMorphism.RemoveRec
     WhatMorphism.RewriteM
     WhatMorphism.SynEq
+    WhatMorphism.Types
 
   Build-depends:
     base             >= 4   && < 5,

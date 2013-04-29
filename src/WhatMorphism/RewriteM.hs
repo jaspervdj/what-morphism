@@ -11,6 +11,7 @@ module WhatMorphism.RewriteM
     , liftMaybe
     , liftMaybe'
     , liftEither
+    , isQuickMode
     , message
     , registeredFold
     , registeredBuild
@@ -54,11 +55,13 @@ import           WhatMorphism.Dump
 import           WhatMorphism.Expr
 import           WhatMorphism.HaskellList
 import           WhatMorphism.Inliner
+import           WhatMorphism.Types
 
 
 --------------------------------------------------------------------------------
 data RewriteRead = RewriteRead
-    { rewriteModGuts  :: ModGuts
+    { rewriteMode     :: WhatMorphismMode
+    , rewriteModGuts  :: ModGuts
     , rewriteRegister :: UniqFM RegisterFoldBuild
     , rewriteInliner  :: InlinerState
     , rewriteBuilds   :: Set String
@@ -67,10 +70,11 @@ data RewriteRead = RewriteRead
 
 
 --------------------------------------------------------------------------------
-mkRewriteRead :: ModGuts -> UniqFM RegisterFoldBuild -> InlinerState
-              -> RewriteRead
-mkRewriteRead mg rg inliner = RewriteRead
-    { rewriteModGuts  = mg
+mkRewriteRead :: WhatMorphismMode -> ModGuts -> UniqFM RegisterFoldBuild
+              -> InlinerState -> RewriteRead
+mkRewriteRead md mg rg inliner = RewriteRead
+    { rewriteMode     = md
+    , rewriteModGuts  = mg
     , rewriteRegister = rg'
     , rewriteInliner  = inliner
     , rewriteBuilds   = bs
@@ -167,6 +171,11 @@ liftMaybe' = liftMaybe "WhatMorphism.RewriteM.liftMaybe'"
 --------------------------------------------------------------------------------
 liftEither :: Either String a -> RewriteM a
 liftEither = RewriteM . const . return
+
+
+--------------------------------------------------------------------------------
+isQuickMode :: RewriteM Bool
+isQuickMode = (== WhatMorphismQuick) . rewriteMode <$> rewriteAsk
 
 
 --------------------------------------------------------------------------------
