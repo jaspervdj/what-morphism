@@ -7,16 +7,18 @@
 -- The forall parameter is of huge importance, since otherwise we can just
 -- construct lists any way we like and ignore the passed-in constructors.
 module WhatMorphism.Build
-    ( toBuild
+    ( buildPass
+    , toBuild
     ) where
 
 
 --------------------------------------------------------------------------------
 import           Control.Applicative   (pure, (<$>), (<*>))
 import           Control.Monad         (forM)
+import           Control.Monad.Error   (catchError)
 import           Control.Monad.Reader  (ReaderT, ask, runReaderT)
 import           Control.Monad.Trans   (lift)
-import           CoreSyn               (Bind (..), Expr (..))
+import           CoreSyn               (Bind (..), CoreBind, Expr (..))
 import qualified CoreSyn               as CoreSyn
 import           DataCon               (DataCon)
 import qualified DataCon               as DataCon
@@ -33,6 +35,25 @@ import           WhatMorphism.Dump
 import           WhatMorphism.Expr
 import           WhatMorphism.RewriteM
 import           WhatMorphism.SynEq
+
+
+--------------------------------------------------------------------------------
+buildPass :: [CoreBind] -> RewriteM [CoreBind]
+buildPass = mapM buildPass'
+  where
+    buildPass' = withBindsEverywhere $ \cb -> withBinds cb $ \f e -> do
+        reg <- isRegisteredFoldOrBuild f
+        if reg
+            then return e
+            else do
+                message $ "====== toBuild: " ++ dump f
+                flip catchError (report e) $ do
+                    e' <- toBuild f e
+                    registerForInlining f e'
+                    return e'
+    report e err = do
+        message $ "====== Error: " ++ err
+        return e
 
 
 --------------------------------------------------------------------------------

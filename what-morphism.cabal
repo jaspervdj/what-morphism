@@ -27,7 +27,6 @@ Library
     WhatMorphism.Fold
     WhatMorphism.Fusion
     WhatMorphism.Inliner
-    WhatMorphism.Pass
     WhatMorphism.RemoveRec
     WhatMorphism.RewriteM
     WhatMorphism.SynEq

@@ -3,6 +3,7 @@ module WhatMorphism.Inliner
     ( InlinerState
     , newInlinerState
     , setNeedsInlining
+    , getNeedsInlining
     , inlinerPass
     ) where
 
@@ -54,6 +55,11 @@ newInlinerState = InlinerState <$> newIORef M.empty
 setNeedsInlining :: Var -> Expr Var -> InlinerState -> IO ()
 setNeedsInlining v e (InlinerState ref) = modifyIORef ref $
     M.insert v $ mkInlinerTemplate e
+
+
+--------------------------------------------------------------------------------
+getNeedsInlining :: Var -> InlinerState -> IO Bool
+getNeedsInlining v (InlinerState ref) = (v `M.member`) <$> readIORef ref
 
 
 --------------------------------------------------------------------------------

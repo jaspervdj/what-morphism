@@ -1,25 +1,47 @@
 --------------------------------------------------------------------------------
 module WhatMorphism.Fold
-    ( toFold
+    ( foldPass
+    , toFold
     ) where
 
 
 --------------------------------------------------------------------------------
-import           Control.Applicative   ((<|>))
-import           Control.Monad         (forM, mplus)
+import           Control.Applicative    ((<|>))
+import           Control.Monad          (forM, mplus)
+import           Control.Monad.Error    (catchError)
 import           CoreSyn
-import           Data.List             (find)
-import qualified MkCore                as MkCore
-import           Type                  (Type)
-import qualified Type                  as Type
-import           Var                   (Var)
-import qualified Var                   as Var
+import           Data.List              (find)
+import qualified MkCore                 as MkCore
+import           Type                   (Type)
+import qualified Type                   as Type
+import           Var                    (Var)
+import qualified Var                    as Var
 
 
 --------------------------------------------------------------------------------
 import           WhatMorphism.Dump
 import           WhatMorphism.Expr
+import           WhatMorphism.RemoveRec
 import           WhatMorphism.RewriteM
+
+
+--------------------------------------------------------------------------------
+foldPass :: [CoreBind] -> RewriteM [CoreBind]
+foldPass = fmap removeRec . mapM foldPass'
+  where
+    foldPass' = withBindsEverywhere $ \cb -> withBinds cb $ \f e -> do
+        reg <- isRegisteredFoldOrBuild f
+        if reg
+            then return e
+            else do
+                message $ "====== toFold: " ++ dump f
+                flip catchError (report e) $ do
+                    e' <- toFold f e
+                    registerForInlining f e'
+                    return e'
+    report e err = do
+        message $ "====== Error: " ++ err
+        return e
 
 
 --------------------------------------------------------------------------------

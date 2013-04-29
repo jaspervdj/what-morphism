@@ -11,6 +11,7 @@ module WhatMorphism.Expr
     , freshVar
     , binds
     , withBinds
+    , withBindsEverywhere
     , foldExpr
     , guessFunctionReturnType
     , getDataCons
@@ -24,7 +25,8 @@ import           Control.Monad              (forM, liftM)
 import           Control.Monad.State.Strict (State, modify, runState)
 import           CoreMonad                  (CoreM)
 import           CoreSyn
-import qualified Data.Generics.Schemes      as Data
+import           Data.Data                  (Data)
+import qualified Data.Generics              as Data
 import           Data.Typeable              (cast)
 import           DataCon                    (DataCon)
 import           Literal                    (Literal)
@@ -115,6 +117,14 @@ withBinds (NonRec b e) f = liftM (NonRec b) $ f b e
 withBinds (Rec bs)     f = liftM Rec $ forM bs $ \(b, e) -> do
     e' <- f b e
     return (b, e')
+
+
+--------------------------------------------------------------------------------
+withBindsEverywhere :: (Data b, Monad m)
+                    => (Bind b -> m (Bind b)) -> Bind b -> m (Bind b)
+withBindsEverywhere f = Data.everywhereM $ \b -> case cast b of
+    Just cb -> f cb >>= \cb' -> return (unsafeCoerce cb')
+    Nothing -> return b
 
 
 --------------------------------------------------------------------------------

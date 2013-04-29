@@ -18,6 +18,7 @@ module WhatMorphism.RewriteM
     , isRegisteredBuild
     , isRegisteredFoldOrBuild
     , registerForInlining
+    , isRegisteredForInlining
     ) where
 
 
@@ -268,3 +269,10 @@ registerForInlining :: Var -> Expr Var -> RewriteM ()
 registerForInlining v e = do
     inliner <- rewriteInliner <$> rewriteAsk
     liftCoreM $ CoreMonad.liftIO $ setNeedsInlining v e inliner
+
+
+--------------------------------------------------------------------------------
+isRegisteredForInlining :: Var -> RewriteM Bool
+isRegisteredForInlining v = do
+    inliner <- rewriteInliner <$> rewriteAsk
+    liftCoreM $ CoreMonad.liftIO $ getNeedsInlining v inliner

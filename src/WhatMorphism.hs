@@ -12,9 +12,10 @@ import qualified Serialized            as Serialized
 
 
 --------------------------------------------------------------------------------
+import           WhatMorphism.Build
+import           WhatMorphism.Fold
 import           WhatMorphism.Fusion
 import           WhatMorphism.Inliner
-import           WhatMorphism.Pass
 import           WhatMorphism.RewriteM
 
 
@@ -32,11 +33,13 @@ installWhatMorphism _args todos = do
     inliner <- CoreMonad.liftIO newInlinerState
     return $ intersperse
         (CoreDoPasses
-            [ CoreDoPluginPass "WhatMorphism"
-                (runRewritePass whatMorphismPass inliner)
-            -- , CoreDoPluginPass "WhatMorphism.Inliner" (inline inliner)
-            -- , CoreDoPluginPass "WhatMorphism.Fusion"
-                -- (runRewritePass fusePass inliner)
+            [ CoreDoPluginPass "WhatMorphism.Build"
+                (runRewritePass buildPass inliner)
+            , CoreDoPluginPass "WhatMorphism.Fold"
+                (runRewritePass foldPass inliner)
+            , CoreDoPluginPass "WhatMorphism.Inliner" (inline inliner)
+            , CoreDoPluginPass "WhatMorphism.Fusion"
+                (runRewritePass fusePass inliner)
             ] )
         todos
   where
