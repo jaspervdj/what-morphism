@@ -41,7 +41,7 @@ foldPass = fmap removeRec . mapM foldPass'
                 flip catchError (report e) $ do
                     e' <- toFold f e
                     registerForInlining f e'
-                    return e'
+                    return $ if quick then e else e'
     report e err = do
         message $ "====== Error: " ++ err
         return e

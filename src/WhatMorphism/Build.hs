@@ -46,7 +46,7 @@ buildPass = mapM buildPass'
         if reg
             then return e
             else do
-                message $ "====== toBuild: " ++ dump f
+                important $ "====== toBuild: " ++ dump f
                 flip catchError (report e) $ do
                     e' <- toBuild f e
                     registerForInlining f e'
