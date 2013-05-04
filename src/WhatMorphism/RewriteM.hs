@@ -13,6 +13,7 @@ module WhatMorphism.RewriteM
     , liftEither
     , isQuickMode
     , message
+    , important
     , registeredFold
     , registeredBuild
     , isRegisteredFold
@@ -26,7 +27,7 @@ module WhatMorphism.RewriteM
 --------------------------------------------------------------------------------
 import           Control.Applicative      (Alternative (..), Applicative (..),
                                            (<$>))
-import           Control.Monad            (ap, liftM2)
+import           Control.Monad            (ap, liftM2, when)
 import           Control.Monad.Error      (MonadError (..))
 import           CoreMonad                (CoreM)
 import qualified CoreMonad                as CoreMonad
@@ -60,25 +61,28 @@ import           WhatMorphism.Types
 
 --------------------------------------------------------------------------------
 data RewriteRead = RewriteRead
-    { rewriteMode     :: WhatMorphismMode
-    , rewriteModGuts  :: ModGuts
-    , rewriteRegister :: UniqFM RegisterFoldBuild
-    , rewriteInliner  :: InlinerState
-    , rewriteBuilds   :: Set String
-    , rewriteFolds    :: Set String
+    { rewriteMode      :: WhatMorphismMode
+    , rewriteVerbosity :: WhatMorphismVerbosity
+    , rewriteModGuts   :: ModGuts
+    , rewriteRegister  :: UniqFM RegisterFoldBuild
+    , rewriteInliner   :: InlinerState
+    , rewriteBuilds    :: Set String
+    , rewriteFolds     :: Set String
     }
 
 
 --------------------------------------------------------------------------------
-mkRewriteRead :: WhatMorphismMode -> ModGuts -> UniqFM RegisterFoldBuild
+mkRewriteRead :: WhatMorphismMode -> WhatMorphismVerbosity
+              -> ModGuts -> UniqFM RegisterFoldBuild
               -> InlinerState -> RewriteRead
-mkRewriteRead md mg rg inliner = RewriteRead
-    { rewriteMode     = md
-    , rewriteModGuts  = mg
-    , rewriteRegister = rg'
-    , rewriteInliner  = inliner
-    , rewriteBuilds   = bs
-    , rewriteFolds    = fs
+mkRewriteRead md vbty mg rg inliner = RewriteRead
+    { rewriteMode      = md
+    , rewriteVerbosity = vbty
+    , rewriteModGuts   = mg
+    , rewriteRegister  = rg'
+    , rewriteInliner   = inliner
+    , rewriteBuilds    = bs
+    , rewriteFolds     = fs
     }
   where
     rg' = rg `UniqFM.plusUFM` haskellListRegister
@@ -180,7 +184,14 @@ isQuickMode = (== WhatMorphismQuick) . rewriteMode <$> rewriteAsk
 
 --------------------------------------------------------------------------------
 message :: String -> RewriteM ()
-message = liftCoreM . CoreMonad.putMsgS
+message str = do
+    vbty <- rewriteVerbosity <$> rewriteAsk
+    when (vbty == WhatMorphismDebug) $ liftCoreM $ CoreMonad.putMsgS str
+
+
+--------------------------------------------------------------------------------
+important :: String -> RewriteM ()
+important = liftCoreM . CoreMonad.putMsgS
 
 
 --------------------------------------------------------------------------------

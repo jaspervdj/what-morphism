@@ -37,7 +37,7 @@ foldPass = fmap removeRec . mapM foldPass'
             (True, _,    _)    -> return e
             (_,    True, True) -> return e
             _                  -> do
-                message $ "====== toFold: " ++ dump f
+                important $ "====== toFold: " ++ dump f
                 flip catchError (report e) $ do
                     e' <- toFold f e
                     registerForInlining f e'
@@ -89,7 +89,7 @@ toFoldOver f ef mkF d (Case (Var x) _ rTyp alts)
         when (or $ map snd alts') $
             case Type.splitTyConApp_maybe (Var.varType d) of
                 Nothing      -> return ()
-                Just (tc, _) -> message $
+                Just (tc, _) -> important $
                     "FoldDetect: " ++ dump f ++ ", " ++ dump tc
 
         fold <- mkFold d rTyp (map fst alts')

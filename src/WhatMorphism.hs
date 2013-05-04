@@ -34,6 +34,12 @@ whatMorphismMode = WhatMorphismFull
 
 
 --------------------------------------------------------------------------------
+-- | CHANGE ME
+whatMorphismVerbosity :: WhatMorphismVerbosity
+whatMorphismVerbosity = WhatMorphismQuiet
+
+
+--------------------------------------------------------------------------------
 installWhatMorphism :: [CommandLineOption] -> [CoreToDo] -> CoreM [CoreToDo]
 installWhatMorphism _args todos = do
     reinitializeGlobals
@@ -61,7 +67,8 @@ installWhatMorphism _args todos = do
         register  <- CoreMonad.getFirstAnnotations
             Serialized.deserializeWithData mg
         mg_binds' <- runRewriteM (pass $ mg_binds mg)
-            (mkRewriteRead whatMorphismMode mg register inliner)
+            (mkRewriteRead
+                whatMorphismMode whatMorphismVerbosity mg register inliner)
         case mg_binds' of
             Left err     -> do
                 CoreMonad.putMsgS $ "Pass failed: " ++ err

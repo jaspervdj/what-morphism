@@ -1,6 +1,7 @@
 --------------------------------------------------------------------------------
 module WhatMorphism.Types
     ( WhatMorphismMode (..)
+    , WhatMorphismVerbosity (..)
     ) where
 
 
@@ -8,4 +9,11 @@ module WhatMorphism.Types
 data WhatMorphismMode
     = WhatMorphismFull
     | WhatMorphismQuick
+    deriving (Show, Eq)
+
+
+--------------------------------------------------------------------------------
+data WhatMorphismVerbosity
+    = WhatMorphismQuiet
+    | WhatMorphismDebug
     deriving (Show, Eq)
