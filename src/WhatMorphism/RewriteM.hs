@@ -11,7 +11,7 @@ module WhatMorphism.RewriteM
     , liftMaybe
     , liftMaybe'
     , liftEither
-    , isQuickMode
+    , isDetectMode
     , message
     , important
     , registeredFold
@@ -21,6 +21,7 @@ module WhatMorphism.RewriteM
     , isRegisteredFoldOrBuild
     , registerForInlining
     , isRegisteredForInlining
+    , rewriteModule
     ) where
 
 
@@ -36,6 +37,7 @@ import           Data.Set                 (Set)
 import qualified Data.Set                 as S
 import           HscTypes                 (ModGuts)
 import qualified HscTypes                 as HscTypes
+import           Module                   (Module)
 import           Name                     (Name)
 import qualified Name                     as Name
 import           OccName                  (OccName)
@@ -61,8 +63,7 @@ import           WhatMorphism.Types
 
 --------------------------------------------------------------------------------
 data RewriteRead = RewriteRead
-    { rewriteMode      :: WhatMorphismMode
-    , rewriteVerbosity :: WhatMorphismVerbosity
+    { rewriteConfig    :: WhatMorphismConfig
     , rewriteModGuts   :: ModGuts
     , rewriteRegister  :: UniqFM RegisterFoldBuild
     , rewriteInliner   :: InlinerState
@@ -72,17 +73,16 @@ data RewriteRead = RewriteRead
 
 
 --------------------------------------------------------------------------------
-mkRewriteRead :: WhatMorphismMode -> WhatMorphismVerbosity
+mkRewriteRead :: WhatMorphismConfig
               -> ModGuts -> UniqFM RegisterFoldBuild
               -> InlinerState -> RewriteRead
-mkRewriteRead md vbty mg rg inliner = RewriteRead
-    { rewriteMode      = md
-    , rewriteVerbosity = vbty
-    , rewriteModGuts   = mg
-    , rewriteRegister  = rg'
-    , rewriteInliner   = inliner
-    , rewriteBuilds    = bs
-    , rewriteFolds     = fs
+mkRewriteRead cfg mg rg inliner = RewriteRead
+    { rewriteConfig   = cfg
+    , rewriteModGuts  = mg
+    , rewriteRegister = rg'
+    , rewriteInliner  = inliner
+    , rewriteBuilds   = bs
+    , rewriteFolds    = fs
     }
   where
     rg' = rg `UniqFM.plusUFM` haskellListRegister
@@ -178,14 +178,15 @@ liftEither = RewriteM . const . return
 
 
 --------------------------------------------------------------------------------
-isQuickMode :: RewriteM Bool
-isQuickMode = (== WhatMorphismQuick) . rewriteMode <$> rewriteAsk
+isDetectMode :: RewriteM Bool
+isDetectMode =
+    (== WhatMorphismDetect) . whatMorphismMode . rewriteConfig <$> rewriteAsk
 
 
 --------------------------------------------------------------------------------
 message :: String -> RewriteM ()
 message str = do
-    vbty <- rewriteVerbosity <$> rewriteAsk
+    vbty <- whatMorphismVerbosity . rewriteConfig <$> rewriteAsk
     when (vbty == WhatMorphismDebug) $ liftCoreM $ CoreMonad.putMsgS str
 
 
@@ -296,3 +297,8 @@ isRegisteredForInlining :: Var -> RewriteM Bool
 isRegisteredForInlining v = do
     inliner <- rewriteInliner <$> rewriteAsk
     liftCoreM $ CoreMonad.liftIO $ getNeedsInlining v inliner
+
+
+--------------------------------------------------------------------------------
+rewriteModule :: RewriteM Module
+rewriteModule = HscTypes.mg_module . rewriteModGuts <$> rewriteAsk

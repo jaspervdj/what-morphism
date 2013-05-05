@@ -29,14 +29,12 @@ plugin = defaultPlugin
 
 --------------------------------------------------------------------------------
 -- | CHANGE ME
-whatMorphismMode :: WhatMorphismMode
-whatMorphismMode = WhatMorphismFull
-
-
---------------------------------------------------------------------------------
--- | CHANGE ME
-whatMorphismVerbosity :: WhatMorphismVerbosity
-whatMorphismVerbosity = WhatMorphismQuiet
+whatMorphismConfig :: WhatMorphismConfig
+whatMorphismConfig = WhatMorphismConfig
+    { whatMorphismScope     = WhatMorphismFull
+    , whatMorphismMode      = WhatMorphismDetect
+    , whatMorphismVerbosity = WhatMorphismQuiet
+    }
 
 
 --------------------------------------------------------------------------------
@@ -46,12 +44,12 @@ installWhatMorphism _args todos = do
     inliner <- CoreMonad.liftIO newInlinerState
 
     let passes
-            | whatMorphismMode == WhatMorphismQuick =
+            | detect     =
                 [ CoreDoPluginPass "WhatMorphism.Fold"
                     (runRewritePass foldPass inliner)
                 ]
 
-            | otherwise                             =
+            | otherwise =
                 [ CoreDoPluginPass "WhatMorphism.Build"
                     (runRewritePass buildPass inliner)
                 , CoreDoPluginPass "WhatMorphism.Fold"
@@ -61,20 +59,34 @@ installWhatMorphism _args todos = do
                     (runRewritePass fusePass inliner)
                 ]
 
-    return $ intersperse (CoreDoPasses passes) todos
+    return $
+        (if whatMorphismScope whatMorphismConfig == WhatMorphismFull
+            then intersperse
+            else afterSimplifier)
+                (CoreDoPasses passes) todos
   where
     runRewritePass pass inliner mg = do
         register  <- CoreMonad.getFirstAnnotations
             Serialized.deserializeWithData mg
         mg_binds' <- runRewriteM (pass $ mg_binds mg)
-            (mkRewriteRead
-                whatMorphismMode whatMorphismVerbosity mg register inliner)
+            (mkRewriteRead whatMorphismConfig mg register inliner)
         case mg_binds' of
             Left err     -> do
                 CoreMonad.putMsgS $ "Pass failed: " ++ err
                 return mg
             Right binds' -> do
                 CoreMonad.putMsgS "Pass okay!"
-                return mg {mg_binds = binds'}
+                return $ if detect then mg else mg {mg_binds = binds'}
 
     inline inliner = bindsOnlyPass (CoreMonad.liftIO . inlinerPass inliner)
+
+    detect = whatMorphismMode whatMorphismConfig == WhatMorphismDetect
+
+
+--------------------------------------------------------------------------------
+afterSimplifier :: CoreToDo -> [CoreToDo] -> [CoreToDo]
+afterSimplifier as = go
+  where
+    go (s@(CoreDoSimplify _ _) : tds) = s : as : go tds
+    go (td                     : tds) = td : go tds
+    go []                             = []

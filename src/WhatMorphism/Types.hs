@@ -1,14 +1,31 @@
 --------------------------------------------------------------------------------
 module WhatMorphism.Types
-    ( WhatMorphismMode (..)
+    ( WhatMorphismConfig (..)
+    , WhatMorphismScope (..)
+    , WhatMorphismMode (..)
     , WhatMorphismVerbosity (..)
     ) where
 
 
 --------------------------------------------------------------------------------
-data WhatMorphismMode
+data WhatMorphismConfig = WhatMorphismConfig
+    { whatMorphismScope     :: WhatMorphismScope
+    , whatMorphismMode      :: WhatMorphismMode
+    , whatMorphismVerbosity :: WhatMorphismVerbosity
+    } deriving (Show)
+
+
+--------------------------------------------------------------------------------
+data WhatMorphismScope
     = WhatMorphismFull
     | WhatMorphismQuick
+    deriving (Show, Eq)
+
+
+--------------------------------------------------------------------------------
+data WhatMorphismMode
+    = WhatMorphismTransform
+    | WhatMorphismDetect
     deriving (Show, Eq)
 
 

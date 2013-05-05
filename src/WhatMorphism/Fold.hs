@@ -6,8 +6,9 @@ module WhatMorphism.Fold
 
 
 --------------------------------------------------------------------------------
-import           Control.Applicative    ((<|>))
+import           Control.Applicative    ((<$>), (<|>))
 import           Control.Monad          (forM, mplus, when)
+import           Control.Monad          (unless)
 import           Control.Monad.Error    (catchError)
 import           CoreSyn
 import           Data.List              (find)
@@ -31,17 +32,16 @@ foldPass = fmap removeRec . mapM foldPass'
   where
     foldPass' = withBindsEverywhere $ \cb -> withBinds cb $ \f e -> do
         reg    <- isRegisteredFoldOrBuild f
-        quick  <- isQuickMode
-        inline <- isRegisteredForInlining f
-        case (reg, quick, inline) of
-            (True, _,    _)    -> return e
-            (_,    True, True) -> return e
-            _                  -> do
+        detect <- isDetectMode
+        case reg of
+            True -> return e
+            _    -> do
                 important $ "====== toFold: " ++ dump f
                 flip catchError (report e) $ do
                     e' <- toFold f e
-                    registerForInlining f e'
-                    return $ if quick then e else e'
+                    unless detect $ registerForInlining f e'
+                    important $ "Created fold."
+                    return e'
     report e err = do
         message $ "====== Error: " ++ err
         return e
@@ -86,14 +86,17 @@ toFoldOver f ef mkF d (Case (Var x) _ rTyp alts)
             return ((ac, expr'), rec)
         -- fold <- mkListFold d rTyp alts'
 
+        module' <- rewriteModule
         when (or $ map snd alts') $
             case Type.splitTyConApp_maybe (Var.varType d) of
                 Nothing      -> return ()
-                Just (tc, _) -> important $
-                    "FoldDetect: " ++ dump f ++ ", " ++ dump tc
+                Just (tc, _) -> important $ "FoldDetect: " ++
+                    dump module' ++ "." ++ dump f ++ ", " ++ dump tc
 
-        fold <- mkFold d rTyp (map fst alts')
-        return $ mkF fold
+        detect <- isDetectMode
+        if detect
+            then return (Var f) -- Worst. Hack. Ever.
+            else mkF <$> mkFold d rTyp (map fst alts')
     | otherwise                 = fail "Wrong argument destructed"
 toFoldOver _ _ _ _ _            = fail "No top-level Case"
 
@@ -163,12 +166,12 @@ rewriteAlt :: (Var -> Expr Var)
            -> RewriteM (Expr Var, Bool)  -- ^ Rewriten expr, any recursive
 rewriteAlt _  _ []       _    body = return (body, False)
 rewriteAlt ef d (t : ts) rTyp body = do
-    (expr, rec) <- rewriteAlt ef d ts rTyp body
-    expr'       <- liftCoreM $ if isRecursive
-        then mkLambda rTyp            (ef t)   expr
+    (expr, rec)   <- rewriteAlt ef d ts rTyp body
+    (expr', rec') <- liftCoreM $ if isRecursive
+        then mkLambda rTyp            (ef t)  expr
         else mkLambda (Var.varType t) (Var t) expr
 
-    return (expr', rec || isRecursive)
+    return (expr', rec || (rec' && isRecursive))
   where
     isRecursive = Var.varType t `Type.eqType` Var.varType d
 

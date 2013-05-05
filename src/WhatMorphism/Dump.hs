@@ -12,6 +12,8 @@ import           DataCon   (DataCon)
 import           Literal   (Literal)
 import           Name      (Name)
 import qualified Name      as Name
+import Module (Module)
+import qualified Module as Module
 import           OccName   (OccName)
 import qualified OccName   as OccName
 import           TyCon     (TyCon)
@@ -78,6 +80,11 @@ instance Dump AltCon where
     dump (DataAlt x) = dc "DataAlt" [dump x]
     dump (LitAlt x)  = dc "Literal" [dump x]
     dump DEFAULT     = dc "DEFAULT" []
+
+
+--------------------------------------------------------------------------------
+instance Dump Module where
+    dump = Module.moduleNameString . Module.moduleName
 
 
 --------------------------------------------------------------------------------

@@ -143,7 +143,7 @@ toVar _       = Nothing
 -- Becomes something like:
 --
 -- > (\tmp -> foo tmp + tmp) x
-mkLambda :: Type -> Expr Var -> Expr Var -> CoreM (Expr Var)
+mkLambda :: Type -> Expr Var -> Expr Var -> CoreM (Expr Var, Bool)
 mkLambda typ needle haystack = do
     tmp <- freshVar "wm" typ
 
@@ -153,8 +153,8 @@ mkLambda typ needle haystack = do
         (haystack', repl)   = replaceExpr check haystack
 
     return $ if repl > 0
-        then Lam tmp haystack'
-        else haystack
+        then (Lam tmp haystack', True)
+        else (haystack, False)
 
 
 --------------------------------------------------------------------------------
