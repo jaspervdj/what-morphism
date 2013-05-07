@@ -33,13 +33,13 @@ import           WhatMorphism.Annotations
 
 
 --------------------------------------------------------------------------------
-foldHaskellList :: b -> (a -> b -> b) -> [a] -> b
+foldHaskellList :: forall a b. b -> (a -> b -> b) -> [a] -> b
 foldHaskellList nil _    []       = nil
 foldHaskellList nil cons (x : xs) = cons x (foldHaskellList nil cons xs)
 
 
 --------------------------------------------------------------------------------
-buildHaskellList :: (forall b. b -> (a -> b -> b) -> b) -> [a]
+buildHaskellList :: forall a. (forall b. b -> (a -> b -> b) -> b) -> [a]
 buildHaskellList g = g [] (:)
 
 
