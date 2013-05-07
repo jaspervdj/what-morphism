@@ -90,7 +90,7 @@ toFoldOver f ef mkF d (Case (Var x) _ rTyp alts)
         when (or $ map snd alts') $
             case Type.splitTyConApp_maybe (Var.varType d) of
                 Nothing      -> return ()
-                Just (tc, _) -> important $ "FoldDetect: " ++
+                Just (tc, _) -> important $ "WhatMorphismResult: Fold: " ++
                     dump module' ++ "." ++ dump f ++ ", " ++ dump tc
 
         detect <- isDetectMode

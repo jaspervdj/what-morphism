@@ -19,6 +19,7 @@ import qualified Var                   as Var
 
 
 --------------------------------------------------------------------------------
+import           WhatMorphism.Dump
 import           WhatMorphism.Expr
 import           WhatMorphism.RewriteM
 
@@ -54,6 +55,8 @@ fuse expr@(App _ _) = case CoreSyn.collectArgs expr of
                     Type t -> return t
                     _      -> fail "bExtraArgs not a type"
                 -}
+                module' <- rewriteModule
+                important $ "WhatMorphismResult: Fusion: " ++ dump module'
                 return $ MkCore.mkCoreApps bLambda $
                     foldConcreteReTy :
                     drop (length foldForAllTys) (init fArgs)

@@ -61,11 +61,10 @@ toBuild :: Var -> Expr Var -> RewriteM (Expr Var)
 toBuild f body = do
     -- We need some info on our type, e.g. 'List'. We find this type by guessing
     -- the return type of our function (real professionalism here).
-    let fTy     = Var.varType f
-        rTy     = guessFunctionReturnType fTy
-        rTyArgs = case Type.splitTyConApp_maybe rTy of
-                    Just (_, tyArgs) -> tyArgs
-                    Nothing          -> []
+    let fTy = Var.varType f
+        rTy = guessFunctionReturnType fTy
+    (rTyCon, rTyArgs) <- liftMaybe "Build has no TyCon" $
+        Type.splitTyConApp_maybe rTy
     liftCoreM $ Outputable.pprTrace "rTy" (Type.pprType rTy) $ return ()
     conses <- liftEither $ getDataCons rTy
 
@@ -100,6 +99,12 @@ toBuild f body = do
     -- TODO: This run is not needed! But useful for now... in some way or
     -- another.
     body'' <- runReaderT (replace body') (BuildRead f g replacements)
+
+    -- Dump some info
+    module' <- rewriteModule
+    important $ "WhatMorphismResult: Build: " ++
+        dump module' ++ "." ++ dump f ++ ", " ++ dump rTyCon
+
     return $
         MkCore.mkCoreLams (fTyBinders ++ newArgs)
             (App

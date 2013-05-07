@@ -32,7 +32,7 @@ plugin = defaultPlugin
 whatMorphismConfig :: WhatMorphismConfig
 whatMorphismConfig = WhatMorphismConfig
     { whatMorphismScope     = WhatMorphismFull
-    , whatMorphismMode      = WhatMorphismDetect
+    , whatMorphismMode      = WhatMorphismTransform
     , whatMorphismVerbosity = WhatMorphismQuiet
     }
 
