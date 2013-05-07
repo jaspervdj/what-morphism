@@ -3,7 +3,6 @@
 module WhatMorphism.Expr
     ( subExprs
     , subExprsInBranch
-    , everywhere
     , count
     , replaceExpr
     , toVar
@@ -77,11 +76,6 @@ subExprsInBranch x = x : go x
     go (Tick _ e)       = subExprs e
     go (Type _)         = []
     go (Coercion _)     = []
-
-
---------------------------------------------------------------------------------
-everywhere :: (Expr Var -> Expr Var) -> Expr Var -> Expr Var
-everywhere f = Data.everywhere $ \x -> maybe x (unsafeCoerce . f) (cast x)
 
 
 --------------------------------------------------------------------------------

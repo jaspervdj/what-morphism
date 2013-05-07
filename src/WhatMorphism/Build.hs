@@ -20,12 +20,16 @@ import           Control.Monad.Reader  (ReaderT, ask, runReaderT)
 import           Control.Monad.Trans   (lift)
 import           CoreSyn               (Bind (..), CoreBind, Expr (..))
 import qualified CoreSyn               as CoreSyn
+import qualified Data.Generics         as Data
+import           Data.Typeable         (cast)
 import           DataCon               (DataCon)
 import qualified DataCon               as DataCon
 import qualified IdInfo                as IdInfo
 import qualified MkCore                as MkCore
 import qualified Outputable            as Outputable
+import           Type                  (Type)
 import qualified Type                  as Type
+import           Unsafe.Coerce         (unsafeCoerce)
 import           Var                   (Var)
 import qualified Var                   as Var
 
@@ -70,11 +74,11 @@ toBuild f body = do
 
     -- Get the build function, if available
     build <- registeredBuild rTy
-    lamTy <- liftMaybe "Build has no Fun Forall type" $ do
-        let (_, buildTy) = Type.splitForAllTys (Var.varType build)
+    (lamTy, consForAllTys) <- liftMaybe "Build has no Fun Forall type" $ do
+        let (consForAllTys, buildTy) = Type.splitForAllTys (Var.varType build)
         (argTy, _) <- Type.splitFunTy_maybe buildTy
         (_, lamTy) <- Type.splitForAllTy_maybe argTy
-        return lamTy
+        return (lamTy, consForAllTys)
     let (_, lamReTy) = Type.splitFunTys lamTy
     lamReTyVar <- liftMaybe "lamRe is no TyVar" $ Type.getTyVar_maybe lamReTy
 
@@ -93,12 +97,13 @@ toBuild f body = do
     -- different constructors of the datatype. This is EXTREMELY IMPORTANT.
     -- However, we BLATANTLY DISREGARD checking this. #yolo
     let (consTys, _) = Type.splitFunTys lamTy
-    lamArgs <- liftCoreM $ forM consTys (freshVar "cons")
+        env          = zip consForAllTys rTyArgs
+    lamArgs <- liftCoreM $ forM consTys (freshVar "cons" . concretiseTypes env)
     let replacements = zip conses lamArgs
 
     -- TODO: This run is not needed! But useful for now... in some way or
     -- another.
-    body'' <- runReaderT (replace body') (BuildRead f g replacements)
+    body'' <- runReaderT (replace body') (BuildRead f g lamReTy replacements)
 
     -- Dump some info
     module' <- rewriteModule
@@ -116,10 +121,23 @@ toBuild f body = do
 
 
 --------------------------------------------------------------------------------
+-- TODO Use TvSubst shizzle
+concretiseTypes :: [(Type.TyVar, Type)] -> Type -> Type
+concretiseTypes env = Data.everywhere $ \x -> case cast x of
+    Just typ -> case Type.getTyVar_maybe typ of
+        Just tyvar -> case lookup tyvar env of
+            Just typ' -> unsafeCoerce typ'
+            Nothing   -> x
+        Nothing    -> x
+    Nothing  -> x
+
+
+--------------------------------------------------------------------------------
 data BuildRead = BuildRead
-    { buildVar            :: Var
-    , buildVarReplacement :: Var
-    , buildReplacements   :: [(DataCon, Var)]
+    { buildVar                    :: Var
+    , buildVarReplacement         :: Var
+    , buildVarReplacementResultTy :: Type  -- Type of 'b'
+    , buildReplacements           :: [(DataCon, Var)]
     }
 
 
@@ -160,7 +178,10 @@ replace (Lam x y) = Lam x <$> replace y
 -- TODO: We might want search the let bindings for the DataCon occurences
 replace (Let bs e) = Let bs <$> replace e
 
-replace (Case e b t alts) = Case e b t <$> mapM replace' alts
+replace (Case e b _t alts) = do
+    t'    <- buildVarReplacementResultTy <$> ask
+    alts' <- mapM replace' alts
+    return $ Case e b t' alts'
   where
     replace' (ac, bs, ae) = do
         ae' <- replace ae
