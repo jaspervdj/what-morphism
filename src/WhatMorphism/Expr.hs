@@ -5,6 +5,8 @@ module WhatMorphism.Expr
     , subExprsInBranch
     , count
     , replaceExpr
+    , substVars
+    , substTyVars
     , toVar
     , mkLambda
     , freshVar
@@ -97,6 +99,28 @@ replaceExpr f = flip runState 0 . state
         Just y  -> case f y of
             Nothing -> return x
             Just y' -> modify (+ 1) >> return (unsafeCoerce y')
+
+
+--------------------------------------------------------------------------------
+substVars :: [(Var, Expr Var)] -> Expr Var -> Expr Var
+substVars env = Data.everywhere $ \x -> case (cast x :: Maybe (Expr Var)) of
+    Just (Var v) -> case lookup v env of
+        Just e  -> unsafeCoerce e
+        Nothing -> x
+    Just _       -> x
+    Nothing      -> x
+
+
+--------------------------------------------------------------------------------
+-- TODO Use TvSubst shizzle
+substTyVars :: [(Type.TyVar, Type)] -> Type -> Type
+substTyVars env = Data.everywhere $ \x -> case cast x of
+    Just typ -> case Type.getTyVar_maybe typ of
+        Just tyvar -> case lookup tyvar env of
+            Just typ' -> unsafeCoerce typ'
+            Nothing   -> x
+        Nothing    -> x
+    Nothing  -> x
 
 
 --------------------------------------------------------------------------------

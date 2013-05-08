@@ -6,6 +6,7 @@
 --
 -- The forall parameter is of huge importance, since otherwise we can just
 -- construct lists any way we like and ignore the passed-in constructors.
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module WhatMorphism.Build
     ( buildPass
     , toBuild
@@ -17,6 +18,7 @@ import           Control.Applicative   (pure, (<$>), (<*>))
 import           Control.Monad         (forM)
 import           Control.Monad.Error   (catchError)
 import           Control.Monad.Reader  (ReaderT, ask, runReaderT)
+import           Control.Monad.State   (StateT, modify, runStateT)
 import           Control.Monad.Trans   (lift)
 import           CoreSyn               (Bind (..), CoreBind, Expr (..))
 import qualified CoreSyn               as CoreSyn
@@ -70,6 +72,7 @@ toBuild f body = do
     (rTyCon, rTyArgs) <- liftMaybe "Build has no TyCon" $
         Type.splitTyConApp_maybe rTy
     liftCoreM $ Outputable.pprTrace "rTy" (Type.pprType rTy) $ return ()
+    -- liftCoreM $ Outputable.pprTrace "rTy" (Outputable.ppr rTy) $ return ()
     conses <- liftEither $ getDataCons rTy
 
     -- Get the build function, if available
@@ -86,8 +89,10 @@ toBuild f body = do
     -- 'f', but with a more general return type.
     --
     -- TODO: This return type is just our new 'b', right? Right? Guys?
-    let gTyArgs = fst $ Type.splitFunTys $ snd $ Type.splitForAllTys fTy
-        gTy     = Type.mkFunTys gTyArgs lamReTy
+    let (_, fArgs, _) = CoreSyn.collectTyAndValBinders body
+        gTy           = Type.mkFunTys (map Var.varType fArgs) lamReTy
+        -- gTyArgs = fst $ Type.splitFunTys $ snd $ Type.splitForAllTys fTy
+        -- gTy     = Type.mkFunTys gTyArgs lamReTy
     g <- liftCoreM $ freshVar "g" gTy
     let (fTyBinders, fValBinders, body') = CoreSyn.collectTyAndValBinders body
     newArgs <- liftCoreM $
@@ -97,13 +102,22 @@ toBuild f body = do
     -- different constructors of the datatype. This is EXTREMELY IMPORTANT.
     -- However, we BLATANTLY DISREGARD checking this. #yolo
     let (consTys, _) = Type.splitFunTys lamTy
-        env          = zip consForAllTys rTyArgs
-    lamArgs <- liftCoreM $ forM consTys (freshVar "cons" . concretiseTypes env)
+    lamArgs <- liftCoreM $ forM consTys (freshVar "dummy")
     let replacements = zip conses lamArgs
 
     -- TODO: This run is not needed! But useful for now... in some way or
     -- another.
-    body'' <- runReaderT (replace body') (BuildRead f g lamReTy replacements)
+    (_, state) <- runStateT (runReaderT (replace body')
+        (BuildRead f g lamReTy replacements)) emptyBuildState
+    dataConTyArgs <- liftMaybe "Build: No DataCon TyArgs!" $
+        buildDataConTyArgs state
+
+    -- Second run go go go. More precise types are now available.
+    let env = zip consForAllTys dataConTyArgs
+    lamArgs' <- liftCoreM $ forM consTys (freshVar "cons" . substTyVars env)
+    let replacements' = zip conses lamArgs'
+    (body'', _) <- runStateT (runReaderT (replace body')
+        (BuildRead f g lamReTy replacements')) emptyBuildState
 
     -- Dump some info
     module' <- rewriteModule
@@ -113,36 +127,47 @@ toBuild f body = do
     return $
         MkCore.mkCoreLams (fTyBinders ++ newArgs)
             (App
-                (MkCore.mkCoreApps (Var build) (map Type rTyArgs))
-                (MkCore.mkCoreLams (lamReTyVar : lamArgs)
+                (MkCore.mkCoreApps
+                    (Var build)
+                    (map Type dataConTyArgs))
+                (MkCore.mkCoreLams (lamReTyVar : lamArgs')
                     (Let
                         (Rec [(g, MkCore.mkCoreLams fValBinders body'')])
                         (MkCore.mkCoreApps (Var g) (map Var newArgs)))))
 
 
 --------------------------------------------------------------------------------
--- TODO Use TvSubst shizzle
-concretiseTypes :: [(Type.TyVar, Type)] -> Type -> Type
-concretiseTypes env = Data.everywhere $ \x -> case cast x of
-    Just typ -> case Type.getTyVar_maybe typ of
-        Just tyvar -> case lookup tyvar env of
-            Just typ' -> unsafeCoerce typ'
-            Nothing   -> x
-        Nothing    -> x
-    Nothing  -> x
+allTyVars :: Type -> [Type.TyVar]
+allTyVars ty = case Type.getTyVar_maybe ty of
+    Just tv -> [tv]
+    Nothing -> case Type.splitTyConApp_maybe ty of
+        Nothing          -> []
+        Just (_tc, apps) -> concatMap allTyVars apps
 
 
 --------------------------------------------------------------------------------
 data BuildRead = BuildRead
-    { buildVar                    :: Var
-    , buildVarReplacement         :: Var
-    , buildVarReplacementResultTy :: Type  -- Type of 'b'
-    , buildReplacements           :: [(DataCon, Var)]
+    { buildVar                 :: Var
+    , buildVarReplacement      :: Var
+    -- , buildResultTy            :: Type
+    , buildReplacementResultTy :: Type  -- Type of 'b'
+    , buildReplacements        :: [(DataCon, Var)]
     }
 
 
 --------------------------------------------------------------------------------
-type Build a = ReaderT BuildRead RewriteM a
+newtype BuildState = BuildState
+    { buildDataConTyArgs :: Maybe [Type]
+    }
+
+
+--------------------------------------------------------------------------------
+emptyBuildState :: BuildState
+emptyBuildState = BuildState Nothing
+
+
+--------------------------------------------------------------------------------
+type Build a = ReaderT BuildRead (StateT BuildState RewriteM) a
 
 
 --------------------------------------------------------------------------------
@@ -161,7 +186,7 @@ replacementForDataCon original dataCon = do
 
 --------------------------------------------------------------------------------
 liftRewriteM :: RewriteM a -> Build a
-liftRewriteM = lift
+liftRewriteM = lift . lift
 
 
 --------------------------------------------------------------------------------
@@ -179,8 +204,11 @@ replace (Lam x y) = Lam x <$> replace y
 replace (Let bs e) = Let bs <$> replace e
 
 replace (Case e b _t alts) = do
-    t'    <- buildVarReplacementResultTy <$> ask
+    -- rt    <- buildResultTy            <$> ask  -- Maybe we can just always
+    --                                            -- replace this...
+    t'    <- buildReplacementResultTy <$> ask
     alts' <- mapM replace' alts
+    -- return $ Case e b (if t `Type.eqType` rt then t' else t) alts'
     return $ Case e b t' alts'
   where
     replace' (ac, bs, ae) = do
@@ -207,6 +235,7 @@ recursionOrReplaceDataCon expr = do
     -- don't need the type arguments anymore (I think).
     let (app, args) = CoreSyn.collectArgs expr
         numTyArgs   = length $ filter CoreSyn.isTypeArg args
+        tyArgs      = [t | Type t <- take numTyArgs args]
 
     case app of
         -- It seems like GHC sometimes generates weird code like this. If
@@ -233,6 +262,7 @@ recursionOrReplaceDataCon expr = do
                         if rec
                             then recursionOrReplaceDataCon arg
                             else return arg
+                    modify $ \s -> s {buildDataConTyArgs = Just tyArgs}
                     return $ MkCore.mkCoreApps (Var replacement) $
                         drop numTyArgs args'
                 _                       -> fail' $ "No DataCon Id: " ++ dump var

@@ -33,7 +33,7 @@ whatMorphismConfig :: WhatMorphismConfig
 whatMorphismConfig = WhatMorphismConfig
     { whatMorphismScope     = WhatMorphismFull
     , whatMorphismMode      = WhatMorphismTransform
-    , whatMorphismVerbosity = WhatMorphismQuiet
+    , whatMorphismVerbosity = WhatMorphismDebug
     }
 
 
