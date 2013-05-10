@@ -22,8 +22,6 @@ import           Control.Monad.State   (StateT, modify, runStateT)
 import           Control.Monad.Trans   (lift)
 import           CoreSyn               (Bind (..), CoreBind, Expr (..))
 import qualified CoreSyn               as CoreSyn
-import qualified Data.Generics         as Data
-import           Data.Typeable         (cast)
 import           DataCon               (DataCon)
 import qualified DataCon               as DataCon
 import qualified IdInfo                as IdInfo
@@ -31,7 +29,6 @@ import qualified MkCore                as MkCore
 import qualified Outputable            as Outputable
 import           Type                  (Type)
 import qualified Type                  as Type
-import           Unsafe.Coerce         (unsafeCoerce)
 import           Var                   (Var)
 import qualified Var                   as Var
 
@@ -114,7 +111,7 @@ toBuild f body = do
 
     -- Second run go go go. More precise types are now available.
     let env = zip consForAllTys dataConTyArgs
-    lamArgs' <- liftCoreM $ forM consTys (freshVar "cons" . substTyVars env)
+    lamArgs' <- liftCoreM $ forM consTys (freshVar "cons" . substTy env)
     let replacements' = zip conses lamArgs'
     (body'', _) <- runStateT (runReaderT (replace body')
         (BuildRead f g lamReTy replacements')) emptyBuildState

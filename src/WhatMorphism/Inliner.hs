@@ -11,18 +11,16 @@ module WhatMorphism.Inliner
 --------------------------------------------------------------------------------
 import           Control.Applicative ((<$>))
 import           Control.Monad       (guard)
+import qualified CoreFVs             as CoreFVs
+import qualified CoreSubst           as CoreSubst
 import           CoreSyn             (CoreBind, Expr (..))
 import qualified CoreSyn             as CoreSyn
-import qualified Data.Generics       as Data
 import           Data.IORef          (IORef, modifyIORef, newIORef, readIORef)
 import           Data.Map            (Map)
 import qualified Data.Map            as M
-import           Data.Typeable       (cast)
 import qualified Outputable          as Outputable
-import           Type                (Type)
-import qualified Type                as Type
-import           Unsafe.Coerce       (unsafeCoerce)
 import           Var                 (Var)
+import qualified VarEnv              as VarEnv
 
 
 --------------------------------------------------------------------------------
@@ -31,10 +29,9 @@ import           WhatMorphism.Expr
 
 --------------------------------------------------------------------------------
 data InlinerTemplate = InlinerTemplate
-    { inlinerExpr   :: Expr Var
-    , inlinerTyArgs :: [Type.TyVar]
-    , inlinerArgs   :: [Var]
-    , inlinerArity  :: Int
+    { inlinerExpr  :: Expr Var
+    , inlinerArgs  :: [Var]
+    , inlinerArity :: Int
     }
 
 
@@ -42,12 +39,11 @@ data InlinerTemplate = InlinerTemplate
 mkInlinerTemplate :: Expr Var -> InlinerTemplate
 mkInlinerTemplate expr = InlinerTemplate
     { inlinerExpr   = expr'
-    , inlinerTyArgs = tyArgs
     , inlinerArgs   = args
-    , inlinerArity  = length (tyArgs ++ args)
+    , inlinerArity  = length (args)
     }
   where
-    (tyArgs, args, expr') = CoreSyn.collectTyAndValBinders expr
+    (args, expr') = CoreSyn.collectBinders expr
 
 
 --------------------------------------------------------------------------------
@@ -90,14 +86,25 @@ inline needsInlining expr = case CoreSyn.collectArgs expr of
     (Var v, args) -> do
         tpl <- M.lookup v needsInlining
         guard $ length args >= inlinerArity tpl
-        let numTyArgs = length (inlinerTyArgs tpl)
-            tvEnv     = zip (inlinerTyArgs tpl) [t | Type t <- args]
-            env       = zip (inlinerArgs tpl) (drop numTyArgs args)
-        return $ substVars env $ substTyVarsInExpr tvEnv $ inlinerExpr tpl
+
+        let inScopeSet =
+                buildInScopeSet (inlinerExpr tpl : args) (inlinerArgs tpl)
+            subst      =
+                CoreSubst.extendSubstList
+                    (CoreSubst.setInScope CoreSubst.emptySubst inScopeSet)
+                    (zip (inlinerArgs tpl) args)
+
+        return $ CoreSubst.substExpr (error "ignored SDoc") subst
+            (inlinerExpr tpl)
     _ -> Nothing
 
-  where
-    substTyVarsInExpr :: [(Type.TyVar, Type)] -> Expr Var -> Expr Var
-    substTyVarsInExpr env = Data.everywhere $ \x -> case cast x of
-        Just t  -> unsafeCoerce $ substTyVars env t
-        Nothing -> x
+
+--------------------------------------------------------------------------------
+buildInScopeSet :: [Expr Var] -> [Var] -> VarEnv.InScopeSet
+buildInScopeSet exprs args =
+    foldr
+        (\v s -> VarEnv.delInScopeSet s v)
+        (foldr
+            (\e s -> VarEnv.extendInScopeSetSet s (CoreFVs.exprFreeVars e))
+            VarEnv.emptyInScopeSet exprs)
+        args

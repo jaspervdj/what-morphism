@@ -5,8 +5,8 @@ module WhatMorphism.Expr
     , subExprsInBranch
     , count
     , replaceExpr
-    , substVars
-    , substTyVars
+    , substExpr
+    , substTy
     , toVar
     , mkLambda
     , freshVar
@@ -24,7 +24,9 @@ module WhatMorphism.Expr
 import           Coercion                   (Coercion)
 import           Control.Monad              (forM, liftM)
 import           Control.Monad.State.Strict (State, modify, runState)
+import qualified CoreFVs                    as CoreFVs
 import           CoreMonad                  (CoreM)
+import qualified CoreSubst                  as CoreSubst
 import           CoreSyn
 import           Data.Data                  (Data)
 import qualified Data.Generics              as Data
@@ -42,6 +44,7 @@ import qualified Unique                     as Unique
 import           Unsafe.Coerce              (unsafeCoerce)
 import           Var                        (Id, Var)
 import qualified Var                        as Var
+import qualified VarEnv                     as VarEnv
 
 
 --------------------------------------------------------------------------------
@@ -102,25 +105,27 @@ replaceExpr f = flip runState 0 . state
 
 
 --------------------------------------------------------------------------------
-substVars :: [(Var, Expr Var)] -> Expr Var -> Expr Var
-substVars env = Data.everywhere $ \x -> case (cast x :: Maybe (Expr Var)) of
-    Just (Var v) -> case lookup v env of
-        Just e  -> unsafeCoerce e
-        Nothing -> x
-    Just _       -> x
-    Nothing      -> x
+mkEasySubst :: [(Var, Expr Var)] -> CoreSubst.Subst
+mkEasySubst env = CoreSubst.extendSubstList
+    (CoreSubst.setInScope CoreSubst.emptySubst inScopeSet) env
+  where
+    inScopeSet = foldr
+        (\v s -> VarEnv.delInScopeSet s v)
+        (foldr
+            (\e s -> VarEnv.extendInScopeSetSet s (CoreFVs.exprFreeVars e))
+            VarEnv.emptyInScopeSet (map snd env))
+        (map fst env)
+
+
+--------------------------------------------------------------------------------
+substExpr :: [(Var, Expr Var)] -> Expr Var -> Expr Var
+substExpr env = CoreSubst.substExpr (error "Ignored SDoc") (mkEasySubst env)
 
 
 --------------------------------------------------------------------------------
 -- TODO Use TvSubst shizzle
-substTyVars :: [(Type.TyVar, Type)] -> Type -> Type
-substTyVars env = Data.everywhere $ \x -> case cast x of
-    Just typ -> case Type.getTyVar_maybe typ of
-        Just tyvar -> case lookup tyvar env of
-            Just typ' -> unsafeCoerce typ'
-            Nothing   -> x
-        Nothing    -> x
-    Nothing  -> x
+substTy :: [(Type.TyVar, Type)] -> Type -> Type
+substTy env = CoreSubst.substTy (mkEasySubst [(v, Type a) | (v, a) <- env])
 
 
 --------------------------------------------------------------------------------
