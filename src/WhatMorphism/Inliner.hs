@@ -18,6 +18,7 @@ import qualified CoreSyn             as CoreSyn
 import           Data.IORef          (IORef, modifyIORef, newIORef, readIORef)
 import           Data.Map            (Map)
 import qualified Data.Map            as M
+import qualified MkCore              as MkCore
 import qualified Outputable          as Outputable
 import           Var                 (Var)
 import qualified VarEnv              as VarEnv
@@ -87,15 +88,18 @@ inline needsInlining expr = case CoreSyn.collectArgs expr of
         tpl <- M.lookup v needsInlining
         guard $ length args >= inlinerArity tpl
 
-        let inScopeSet =
-                buildInScopeSet (inlinerExpr tpl : args) (inlinerArgs tpl)
-            subst      =
+        let (args', excess) = splitAt (inlinerArity tpl) args
+
+            inScopeSet      =
+                buildInScopeSet (inlinerExpr tpl : args') (inlinerArgs tpl)
+            subst           =
                 CoreSubst.extendSubstList
                     (CoreSubst.setInScope CoreSubst.emptySubst inScopeSet)
-                    (zip (inlinerArgs tpl) args)
+                    (zip (inlinerArgs tpl) args')
 
-        return $ CoreSubst.substExpr (error "ignored SDoc") subst
-            (inlinerExpr tpl)
+        return $ MkCore.mkCoreApps
+            (CoreSubst.substExpr (error "ignored SDoc") subst (inlinerExpr tpl))
+            excess
     _ -> Nothing
 
 

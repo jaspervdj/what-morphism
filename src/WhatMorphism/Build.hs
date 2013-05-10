@@ -66,7 +66,7 @@ toBuild f body = do
     -- the return type of our function (real professionalism here).
     let fTy = Var.varType f
         rTy = guessFunctionReturnType fTy
-    (rTyCon, rTyArgs) <- liftMaybe "Build has no TyCon" $
+    (rTyCon, _rTyArgs) <- liftMaybe "Build has no TyCon" $
         Type.splitTyConApp_maybe rTy
     liftCoreM $ Outputable.pprTrace "rTy" (Type.pprType rTy) $ return ()
     -- liftCoreM $ Outputable.pprTrace "rTy" (Outputable.ppr rTy) $ return ()
@@ -131,15 +131,6 @@ toBuild f body = do
                     (Let
                         (Rec [(g, MkCore.mkCoreLams fValBinders body'')])
                         (MkCore.mkCoreApps (Var g) (map Var newArgs)))))
-
-
---------------------------------------------------------------------------------
-allTyVars :: Type -> [Type.TyVar]
-allTyVars ty = case Type.getTyVar_maybe ty of
-    Just tv -> [tv]
-    Nothing -> case Type.splitTyConApp_maybe ty of
-        Nothing          -> []
-        Just (_tc, apps) -> concatMap allTyVars apps
 
 
 --------------------------------------------------------------------------------
