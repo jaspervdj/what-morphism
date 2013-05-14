@@ -33,7 +33,7 @@ mkFold foldName typeName typeBndrs cons = do
             y  <- newName "y"
             return (y, t)
         return $ (c, f, tys)
-    x      <- newName "x"  -- Argument we're destroying
+    go     <- newName "go"  -- Worker
 
     return
         [ SigD foldName' $ ForallT (typeBndrs ++ [PlainTV a]) [] $
@@ -49,23 +49,21 @@ mkFold foldName typeName typeBndrs cons = do
 
         , FunD foldName'
             [ Clause
-                ([VarP f | (_, f, _) <- consFs] ++ [VarP x])
-                (NormalB
-                    (CaseE (VarE x)
-                        [ Match
-                            (ConP (conName c) (map VarP $ map fst ys))
-                            (NormalB $ mkAppE (VarE f)
-                                [ if isRecursive t
-                                    then mkAppE (VarE foldName')
-                                            ([VarE f' | (_, f', _) <- consFs] ++
-                                                [VarE y])
-                                    else VarE y
-                                | (y, t) <- ys]
-                                )
-                            []
-                        | (c, f, ys) <- consFs
-                        ]))
-                []
+                ([VarP f | (_, f, _) <- consFs])
+                (NormalB (VarE go))
+                [ FunD go
+                    [ Clause
+                        [ConP (conName c) (map VarP $ map fst ys)]
+                        (NormalB $ mkAppE (VarE f)
+                            [ if isRecursive t
+                                then AppE (VarE go) (VarE y)
+                                else VarE y
+                            | (y, t) <- ys]
+                            )
+                        []
+                    | (c, f, ys) <- consFs
+                    ]
+                ]
             ]
         ]
   where

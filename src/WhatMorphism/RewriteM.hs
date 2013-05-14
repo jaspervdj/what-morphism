@@ -86,8 +86,8 @@ mkRewriteRead cfg mg rg inliner = RewriteRead
     }
   where
     rg' = rg `UniqFM.plusUFM` haskellListRegister
-    fs  = S.fromList [f | RegisterFoldBuild f _ <- UniqFM.eltsUFM rg]
-    bs  = S.fromList [b | RegisterFoldBuild _ b <- UniqFM.eltsUFM rg]
+    fs  = S.fromList [f | RegisterFoldBuild f _ <- UniqFM.eltsUFM rg']
+    bs  = S.fromList [b | RegisterFoldBuild _ b <- UniqFM.eltsUFM rg']
 
 
 --------------------------------------------------------------------------------

@@ -34,17 +34,17 @@ foldPass = fmap removeRec . mapM foldPass'
         reg    <- isRegisteredFoldOrBuild f
         detect <- isDetectMode
         case reg of
-            True -> return e
+            True -> return (f, e)
             _    -> do
                 important $ "====== toFold: " ++ dump f
-                flip catchError (report e) $ do
+                flip catchError (report f e) $ do
                     e' <- toFold f e
                     unless detect $ registerForInlining f e'
                     important $ "Created fold."
-                    return e'
-    report e err = do
+                    return (setInlineInfo f, e')
+    report f e err = do
         message $ "====== Error: " ++ err
-        return e
+        return (f, e)
 
 
 --------------------------------------------------------------------------------

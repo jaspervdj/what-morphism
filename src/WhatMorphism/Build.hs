@@ -22,6 +22,7 @@ import           Control.Monad.State   (StateT, modify, runStateT)
 import           Control.Monad.Trans   (lift)
 import           CoreSyn               (Bind (..), CoreBind, Expr (..))
 import qualified CoreSyn               as CoreSyn
+import           Data.Maybe            (isJust)
 import           DataCon               (DataCon)
 import qualified DataCon               as DataCon
 import qualified IdInfo                as IdInfo
@@ -47,16 +48,16 @@ buildPass = mapM buildPass'
     buildPass' = withBindsEverywhere $ \cb -> withBinds cb $ \f e -> do
         reg <- isRegisteredFoldOrBuild f
         if reg
-            then return e
+            then return (f, e)
             else do
                 important $ "====== toBuild: " ++ dump f
-                flip catchError (report e) $ do
+                flip catchError (report f e) $ do
                     e' <- toBuild f e
                     registerForInlining f e'
-                    return e'
-    report e err = do
+                    return (setInlineInfo f, e')
+    report f e err = do
         message $ "====== Error: " ++ err
-        return e
+        return (f, e)
 
 
 --------------------------------------------------------------------------------
@@ -104,7 +105,7 @@ toBuild f body = do
 
     -- TODO: This run is not needed! But useful for now... in some way or
     -- another.
-    (_, state) <- runStateT (runReaderT (replace body')
+    (_, state) <- runStateT (runReaderT (replace [] body')
         (BuildRead f g lamReTy replacements)) emptyBuildState
     dataConTyArgs <- liftMaybe "Build: No DataCon TyArgs!" $
         buildDataConTyArgs state
@@ -113,7 +114,7 @@ toBuild f body = do
     let env = zip consForAllTys dataConTyArgs
     lamArgs' <- liftCoreM $ forM consTys (freshVar "cons" . substTy env)
     let replacements' = zip conses lamArgs'
-    (body'', _) <- runStateT (runReaderT (replace body')
+    (body'', _) <- runStateT (runReaderT (replace [] body')
         (BuildRead f g lamReTy replacements')) emptyBuildState
 
     -- Dump some info
@@ -178,20 +179,21 @@ liftRewriteM = lift . lift
 
 
 --------------------------------------------------------------------------------
-replace :: Expr Var -> Build (Expr Var)
-replace (Var x) = return (Var x)
+replace :: [(Var, Expr Var)] -> Expr Var -> Build (Expr Var)
+replace env e@(Var _) = recursionOrReplaceDataCon env e
 
-replace (Lit x) = return (Lit x)
+replace _ (Lit x) = return (Lit x)
 
 -- Real work here. TODO: replacement?
-replace e@(App _ _) = recursionOrReplaceDataCon e
+replace env e@(App _ _) = recursionOrReplaceDataCon env e
 
-replace (Lam x y) = Lam x <$> replace y
+replace env (Lam x y) = Lam x <$> replace env y
 
 -- TODO: We might want search the let bindings for the DataCon occurences
-replace (Let bs e) = Let bs <$> replace e
+replace env (Let (NonRec v b) e) = Let (NonRec v b) <$> replace ((v, b) : env) e
+replace env (Let bs e) = Let bs <$> replace env e
 
-replace (Case e b _t alts) = do
+replace env (Case e b _t alts) = do
     -- rt    <- buildResultTy            <$> ask  -- Maybe we can just always
     --                                            -- replace this...
     t'    <- buildReplacementResultTy <$> ask
@@ -200,23 +202,23 @@ replace (Case e b _t alts) = do
     return $ Case e b t' alts'
   where
     replace' (ac, bs, ae) = do
-        ae' <- replace ae
+        ae' <- replace env ae
         return (ac, bs, ae')
 
-replace (Cast e c) = Cast <$> replace e <*> pure c
+replace env (Cast e c) = Cast <$> replace env e <*> pure c
 
-replace (Tick t e) = Tick t <$> replace e
+replace env (Tick t e) = Tick t <$> replace env e
 
-replace (Type t) = return (Type t)
+replace _ (Type t) = return (Type t)
 
-replace (Coercion c) = return (Coercion c)
+replace _ (Coercion c) = return (Coercion c)
 
 
 --------------------------------------------------------------------------------
 -- We generally want to search for a DataCon OR recursion to our function (needs
 -- to be added in Reader).
-recursionOrReplaceDataCon :: Expr Var -> Build (Expr Var)
-recursionOrReplaceDataCon expr = do
+recursionOrReplaceDataCon :: [(Var, Expr Var)] -> Expr Var -> Build (Expr Var)
+recursionOrReplaceDataCon env expr = do
     recursionVar <- buildVar <$> ask
 
     -- In case we replace a constructor, or a (polymorphic) recursive call, we
@@ -230,15 +232,19 @@ recursionOrReplaceDataCon expr = do
         -- needed, this can be made more general by remembering the number of
         -- 'Lam's we can skip.
         (Lam x e) -> do
-            e' <- recursionOrReplaceDataCon e
+            e' <- recursionOrReplaceDataCon env e
             return $ MkCore.mkCoreApps (Lam x e') args
         (Var var)
-            | var .==. recursionVar -> do
+            | var .==. recursionVar  -> do
                 replacement <- buildVarReplacement <$> ask
                 liftRewriteM $ message $ "Recursion found, OK"
                 return $ MkCore.mkCoreApps (Var replacement) $
                     drop numTyArgs args
-            | Var.isId var          -> case Var.idDetails var of
+            -- Simple variable substitution
+            | null args && inEnv var ->
+                let Just expr' = lookup var env
+                in recursionOrReplaceDataCon env expr'
+            | Var.isId var           -> case Var.idDetails var of
                 IdInfo.DataConWorkId dc -> do
                     replacement <- replacementForDataCon var dc
                     let ris = recursiveIndices dc
@@ -248,16 +254,17 @@ recursionOrReplaceDataCon expr = do
                     -- equal?
                     args' <- forM (zip args ris) $ \(arg, rec) ->
                         if rec
-                            then recursionOrReplaceDataCon arg
+                            then recursionOrReplaceDataCon env arg
                             else return arg
                     modify $ \s -> s {buildDataConTyArgs = Just tyArgs}
                     return $ MkCore.mkCoreApps (Var replacement) $
                         drop numTyArgs args'
                 _                       -> fail' $ "No DataCon Id: " ++ dump var
-            | otherwise             -> fail' "Unexpected Var"
+            | otherwise              -> fail' "Unexpected Var"
         _ -> fail' "No App or Var found"
   where
     fail' err = fail $ "WhatMorphism.Build.recursionOrReplaceDataCon: " ++ err
+    inEnv e   = isJust (lookup e env)
 
 
 --------------------------------------------------------------------------------

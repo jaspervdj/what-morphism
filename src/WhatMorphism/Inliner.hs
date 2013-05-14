@@ -75,10 +75,10 @@ getNeedsInlining v (InlinerState ref) = (v `M.member`) <$> readIORef ref
 
 --------------------------------------------------------------------------------
 inlinerPass :: InlinerState -> [CoreBind] -> IO [CoreBind]
-inlinerPass (InlinerState ref) = mapM $ \b -> withBinds b $ \_ expr -> do
+inlinerPass (InlinerState ref) = mapM $ \b -> withBinds b $ \v expr -> do
     needsInlining <- readIORef ref
     let (expr', _) = replaceExpr (inline needsInlining) expr
-    return expr'
+    return (v, expr')
 
 
 --------------------------------------------------------------------------------

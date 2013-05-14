@@ -26,10 +26,15 @@ import           WhatMorphism.RewriteM
 
 --------------------------------------------------------------------------------
 fusePass :: [CoreBind] -> RewriteM [CoreBind]
-fusePass = mapM $ \b -> withBinds b $ \_ ->
-    Data.everywhereM $ \e -> case cast e of
-        Just e' -> unsafeCoerce $ catchError (fuse e') (const $ return e')
-        Nothing -> return e
+fusePass = mapM $ \b -> withBinds b $ \v expr -> do
+    expr' <- Data.everywhereM
+        (\me -> case cast me of
+            Nothing -> return me
+            Just e  -> unsafeCoerce $ catchError (fuse e) $ \err -> do
+                message $ "fusePass: " ++ err
+                return e)
+        expr
+    return (v, expr')
 
 
 --------------------------------------------------------------------------------
@@ -37,7 +42,7 @@ fuse :: Expr Var -> RewriteM (Expr Var)
 fuse expr@(App _ _) = case CoreSyn.collectArgs expr of
     (Var fold, fArgs) -> do
         fReg <- isRegisteredFold fold
-        unless fReg $ fail "Not a registered fold"
+        unless fReg $ fail $ "Not a registered fold: " ++ dump fold
         let foldTy                   = Var.varType fold
             (foldForAllTys, foldTy') = Type.splitForAllTys foldTy
             (foldArgTys, _foldReTy)  = Type.splitFunTys foldTy'

@@ -17,10 +17,12 @@ module WhatMorphism.Expr
     , guessFunctionReturnType
     , getDataCons
     , idBaseName
+    , setInlineInfo
     ) where
 
 
 --------------------------------------------------------------------------------
+import qualified BasicTypes                 as BasicTypes
 import           Coercion                   (Coercion)
 import           Control.Monad              (forM, liftM)
 import           Control.Monad.State.Strict (State, modify, runState)
@@ -32,6 +34,8 @@ import           Data.Data                  (Data)
 import qualified Data.Generics              as Data
 import           Data.Typeable              (cast)
 import           DataCon                    (DataCon)
+import qualified IdInfo                     as IdInfo
+import qualified Id as Id
 import           Literal                    (Literal)
 import qualified Name                       as Name
 import qualified OccName                    as OccName
@@ -135,11 +139,13 @@ binds (Rec bs)     = bs
 
 
 --------------------------------------------------------------------------------
-withBinds :: Monad m => Bind b -> (b -> Expr b -> m (Expr b)) -> m (Bind b)
-withBinds (NonRec b e) f = liftM (NonRec b) $ f b e
+withBinds :: Monad m => Bind b -> (b -> Expr b -> m (b, Expr b)) -> m (Bind b)
+withBinds (NonRec b e) f = do
+    (b', e') <- f b e
+    return $ NonRec b' e'
 withBinds (Rec bs)     f = liftM Rec $ forM bs $ \(b, e) -> do
-    e' <- f b e
-    return (b, e')
+    (b', e') <- f b e
+    return (b', e')
 
 
 --------------------------------------------------------------------------------
@@ -243,3 +249,10 @@ getDataCons typ = case Type.splitTyConApp_maybe typ of
 --------------------------------------------------------------------------------
 idBaseName :: Id -> String
 idBaseName = OccName.occNameString . Name.nameOccName . Var.varName
+
+
+--------------------------------------------------------------------------------
+setInlineInfo :: Var -> Var
+setInlineInfo = Id.modifyIdInfo $
+    (`IdInfo.setInlinePragInfo` BasicTypes.alwaysInlinePragma) .
+    (`IdInfo.setOccInfo` IdInfo.NoOccInfo)
