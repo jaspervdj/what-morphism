@@ -120,9 +120,10 @@ mkBuild buildName typeName typeBndrs cons = do
 
 --------------------------------------------------------------------------------
 mkAppTy :: Name -> [TyVarBndr] -> Type
-mkAppTy name []                  = ConT name
-mkAppTy name (PlainTV x : xs)    = AppT (mkAppTy name xs) (VarT x)
-mkAppTy name (KindedTV x _ : xs) = AppT (mkAppTy name xs) (VarT x)
+mkAppTy name = foldl (\t tv -> AppT t (VarT (getTv tv))) (ConT name)
+  where
+    getTv (PlainTV x)    = x
+    getTv (KindedTV x _) = x
 
 
 --------------------------------------------------------------------------------
