@@ -181,9 +181,7 @@ mkLambda typ needle haystack = do
             | otherwise     = Nothing
         (haystack', repl)   = replaceExpr check haystack
 
-    return $ if repl > 0
-        then (Lam tmp haystack', True)
-        else (haystack, False)
+    return $ (Lam tmp haystack', repl > 0)
 
 
 --------------------------------------------------------------------------------

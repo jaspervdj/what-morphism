@@ -10,6 +10,7 @@ import           Control.Applicative    ((<$>), (<|>))
 import           Control.Monad          (forM, mplus, when)
 import           Control.Monad          (unless)
 import           Control.Monad.Error    (catchError)
+import qualified CoreFVs                as CoreFVs
 import           CoreSyn
 import           Data.List              (find)
 import qualified MkCore                 as MkCore
@@ -17,6 +18,7 @@ import           Type                   (Type)
 import qualified Type                   as Type
 import           Var                    (Var)
 import qualified Var                    as Var
+import qualified VarSet                 as VarSet
 
 
 --------------------------------------------------------------------------------
@@ -75,14 +77,16 @@ toFoldOver :: Var
            -> RewriteM (Expr Var)
 toFoldOver f ef mkF d (Lam x body) =
     toFoldOver f (\t -> App (ef t) (Var x)) (\e -> mkF (Lam x e)) d body
-toFoldOver f ef mkF d (Case (Var x) _ rTyp alts)
+toFoldOver f ef mkF d (Case (Var x) caseBinder rTyp alts)
     | x == d                    = do
         alts' <- forM alts $ \(ac, bnds, expr) -> do
             message $ "Rewriting AltCon " ++ dump ac
             message $ "Was: " ++ dump expr
             (expr', rec) <- rewriteAlt ef d bnds rTyp expr
             message $ "Now: " ++ dump expr'
-            assertWellScoped (x : bnds) expr'
+            -- Note how the case binder cannot appear in the result, since it is
+            -- a synonym for `x`.
+            assertWellScoped (caseBinder : x : bnds) expr'
             return ((ac, expr'), rec)
         -- fold <- mkListFold d rTyp alts'
 
@@ -180,12 +184,8 @@ rewriteAlt ef d (t : ts) rTyp body = do
 -- | We don't actually do any scoping, we just have a list of vars which can't
 -- appear anymore.
 assertWellScoped :: [Var] -> Expr Var -> RewriteM ()
-assertWellScoped vars body = case find (`inScope` body) vars of
-    Nothing  -> message "Scope okay"
-    Just var -> fail $
-        "Not well-scoped: " ++ dump var ++ " still appears after rewriting"
-
-
---------------------------------------------------------------------------------
-inScope :: Var -> Expr Var -> Bool
-inScope x body = count (Var x) body > 0
+assertWellScoped vars body = case find (`VarSet.elemVarSet` varSet) vars of
+    Just v -> fail $ "Not well-scoped: " ++ dump v ++ " still appears"
+    _      -> return ()
+  where
+    varSet = CoreFVs.exprFreeVars body
