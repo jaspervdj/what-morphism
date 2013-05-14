@@ -117,6 +117,7 @@ mkFold d rTyp alts = do
     message $ "Conses: " ++ dump conses
     message $ "Our registered fold is: " ++ dump fold
     message $ "Of the type: " ++ dump (Var.varType fold)
+    important $ "Creating fold using: " ++ dump fold
     return $ MkCore.mkCoreApps (Var fold) $
         -- Type arguments to destroyed thingy
         (map Type dTyArgs) ++
