@@ -34,8 +34,10 @@ import           WhatMorphism.Annotations
 
 --------------------------------------------------------------------------------
 foldHaskellList :: forall a b. b -> (a -> b -> b) -> [a] -> b
-foldHaskellList nil _    []       = nil
-foldHaskellList nil cons (x : xs) = cons x (foldHaskellList nil cons xs)
+foldHaskellList nil cons = foldHaskellList_go
+  where
+    foldHaskellList_go []       = nil
+    foldHaskellList_go (x : xs) = cons x (foldHaskellList_go xs)
 
 
 --------------------------------------------------------------------------------

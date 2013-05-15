@@ -33,7 +33,7 @@ mkFold foldName typeName typeBndrs cons = do
             y  <- newName "y"
             return (y, t)
         return $ (c, f, tys)
-    go     <- newName "go"  -- Worker
+    go     <- newName (foldName ++ "_go")  -- Worker
 
     return
         [ SigD foldName' $ ForallT (typeBndrs ++ [PlainTV a]) [] $
