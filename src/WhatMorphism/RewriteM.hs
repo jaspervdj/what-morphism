@@ -33,6 +33,8 @@ import           Control.Monad.Error      (MonadError (..))
 import           CoreMonad                (CoreM)
 import qualified CoreMonad                as CoreMonad
 import           CoreSyn                  (Expr)
+import           Data.Map                 (Map)
+import qualified Data.Map                 as M
 import           Data.Set                 (Set)
 import qualified Data.Set                 as S
 import           HscTypes                 (ModGuts)
@@ -42,6 +44,7 @@ import           Name                     (Name)
 import qualified Name                     as Name
 import           OccName                  (OccName)
 import qualified OccName                  as OccName
+import qualified Outputable               as Outputable
 import qualified RdrName                  as RdrName
 import           Type                     (Type)
 import qualified Type                     as Type
@@ -69,6 +72,7 @@ data RewriteRead = RewriteRead
     , rewriteInliner   :: InlinerState
     , rewriteBuilds    :: Set String
     , rewriteFolds     :: Set String
+    , rewriteNameCache :: Map String Name  -- Super hacky
     }
 
 
@@ -77,17 +81,32 @@ mkRewriteRead :: WhatMorphismConfig
               -> ModGuts -> UniqFM RegisterFoldBuild
               -> InlinerState -> RewriteRead
 mkRewriteRead cfg mg rg inliner = RewriteRead
-    { rewriteConfig   = cfg
-    , rewriteModGuts  = mg
-    , rewriteRegister = rg'
-    , rewriteInliner  = inliner
-    , rewriteBuilds   = bs
-    , rewriteFolds    = fs
+    { rewriteConfig    = cfg
+    , rewriteModGuts   = mg
+    , rewriteRegister  = rg'
+    , rewriteInliner   = inliner
+    , rewriteBuilds    = bs
+    , rewriteFolds     = fs
+    , rewriteNameCache = nc
     }
   where
     rg' = rg `UniqFM.plusUFM` haskellListRegister
     fs  = S.fromList [f | RegisterFoldBuild f _ <- UniqFM.eltsUFM rg']
     bs  = S.fromList [b | RegisterFoldBuild _ b <- UniqFM.eltsUFM rg']
+
+    gre = HscTypes.mg_rdr_env mg
+    nc  = M.fromList
+        [ (OccName.occNameString (Name.nameOccName name), name)
+        | elts <- OccName.occEnvElts gre
+        , elt  <- elts
+        , isImported elt
+        , let name = RdrName.gre_name elt
+        ]
+
+    isImported :: RdrName.GlobalRdrElt -> Bool
+    isImported elt = case RdrName.gre_prov elt of
+        RdrName.Imported _ -> True
+        _                  -> False
 
 
 --------------------------------------------------------------------------------
@@ -229,23 +248,28 @@ registeredBuild typ = do
 --------------------------------------------------------------------------------
 lookupImportedString :: String -> RewriteM Id
 lookupImportedString name = do
-    name' <- lookupImportedOccName (OccName.mkVarOcc name)
-    liftCoreM $ HscTypes.lookupId name'
+    nameCache <- rewriteNameCache <$> rewriteAsk
+    case M.lookup name nameCache of
+        Just name' -> liftCoreM $ HscTypes.lookupId name'
+        Nothing    -> fail $ "No Name found for " ++ name ++ " in rdr_env"
 
 
 --------------------------------------------------------------------------------
+{-
 lookupImportedOccName :: OccName -> RewriteM Name
 lookupImportedOccName oname = do
     gre <- HscTypes.mg_rdr_env . rewriteModGuts <$> rewriteAsk
     let candidates = filter isImported $ lookupGlobalRdrEnv gre oname
-    case candidates of
-        []        -> fail $ "No Name found for " ++ dump oname ++ " in rdr_env"
-        (elt : _) -> return (RdrName.gre_name elt)
+    Outputable.pprTrace "rdr_env" (Outputable.ppr gre) $
+        case candidates of
+            []        -> fail $ "No Name found for " ++ dump oname ++ " in rdr_env"
+            (elt : _) -> return (RdrName.gre_name elt)
   where
     isImported :: RdrName.GlobalRdrElt -> Bool
     isImported elt = case RdrName.gre_prov elt of
         RdrName.Imported _ -> True
         _                  -> False
+-}
 
 
 --------------------------------------------------------------------------------
@@ -253,6 +277,7 @@ lookupImportedOccName oname = do
 -- we need it? Because the original seems to be broken in very peculiar ways. I
 -- think I might be generating 'OccName's in a wrong way but there is no way to
 -- tell with so little documentation...
+{-
 lookupGlobalRdrEnv :: RdrName.GlobalRdrEnv -> OccName -> [RdrName.GlobalRdrElt]
 lookupGlobalRdrEnv env oname =
     [ elt
@@ -261,6 +286,7 @@ lookupGlobalRdrEnv env oname =
     , OccName.occNameString (Name.nameOccName (RdrName.gre_name elt)) ==
         OccName.occNameString oname
     ]
+-}
 
 
 --------------------------------------------------------------------------------
