@@ -13,6 +13,7 @@ import           Control.Monad.Error    (catchError)
 import qualified CoreFVs                as CoreFVs
 import           CoreSyn
 import           Data.List              (find)
+import qualified DataCon                as DataCon
 import qualified MkCore                 as MkCore
 import           Type                   (Type)
 import qualified Type                   as Type
@@ -79,15 +80,23 @@ toFoldOver f ef mkF d (Lam x body) =
     toFoldOver f (\t -> App (ef t) (Var x)) (\e -> mkF (Lam x e)) d body
 toFoldOver f ef mkF d (Case (Var x) caseBinder rTyp alts)
     | x == d                    = do
-        alts' <- forM alts $ \(ac, bnds, expr) -> do
+        when (isUnliftedType rTyp) $
+            fail "Cannot deal with unlifted fold result types"
+
+        alts' <- forM alts $ \alt@(ac, bnds, expr) -> do
             message $ "Rewriting AltCon " ++ dump ac
             message $ "Was: " ++ dump expr
-            (expr', rec) <- rewriteAlt ef d bnds rTyp expr
-            message $ "Now: " ++ dump expr'
+            -- Left-hand side of the case alternative. We can replace x and the
+            -- caseBinder by this, this helps us recognize folds in some cases.
+            lhs <- altLhs x alt
+            let env    = [(x, lhs), (caseBinder, lhs)]
+                expr' = substExpr env expr
+            (expr'', rec) <- rewriteAlt ef d bnds rTyp expr'
+            message $ "Now: " ++ dump expr''
             -- Note how the case binder cannot appear in the result, since it is
             -- a synonym for `x`.
-            assertWellScoped (caseBinder : x : bnds) expr'
-            return ((ac, expr'), rec)
+            assertWellScoped (caseBinder : x : bnds) expr''
+            return ((ac, expr''), rec)
         -- fold <- mkListFold d rTyp alts'
 
         module' <- rewriteModule
@@ -103,6 +112,20 @@ toFoldOver f ef mkF d (Case (Var x) caseBinder rTyp alts)
             else mkF <$> mkFold d rTyp (map fst alts')
     | otherwise                 = fail "Wrong argument destructed"
 toFoldOver _ _ _ _ _            = fail "No top-level Case"
+
+
+--------------------------------------------------------------------------------
+altLhs :: Var -> Alt Var -> RewriteM (Expr Var)
+altLhs x (ac, bs, _) = case ac of
+    LitAlt l   -> return (Lit l)
+    DEFAULT    -> return (Var x)
+    DataAlt dc -> do
+        xTyArgs <- liftMaybe "Destructed Var is no TyCon..." $ do
+            (_, as) <- Type.splitTyConApp_maybe (Var.varType x)
+            return as
+        return $ MkCore.mkCoreApps
+            (Var (DataCon.dataConWrapId dc))
+            (map Type xTyArgs ++ map Var bs)
 
 
 --------------------------------------------------------------------------------

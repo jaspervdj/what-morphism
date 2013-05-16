@@ -18,6 +18,7 @@ module WhatMorphism.Expr
     , getDataCons
     , idBaseName
     , setInlineInfo
+    , isUnliftedType
     ) where
 
 
@@ -254,3 +255,8 @@ setInlineInfo :: Var -> Var
 setInlineInfo = Id.modifyIdInfo $
     (`IdInfo.setInlinePragInfo` BasicTypes.alwaysInlinePragma) .
     (`IdInfo.setOccInfo` IdInfo.NoOccInfo)
+
+
+--------------------------------------------------------------------------------
+isUnliftedType :: Type -> Bool
+isUnliftedType = (`Type.eqType` Type.unliftedTypeKind) . Type.typeKind
