@@ -6,13 +6,16 @@ module WhatMorphism.Fold
 
 
 --------------------------------------------------------------------------------
-import           Control.Applicative    ((<$>), (<|>))
-import           Control.Monad          (forM, mplus, when)
-import           Control.Monad          (unless)
+import           Control.Applicative    (pure, (<$>), (<*>))
+import           Control.Monad          (forM, mplus, unless, when, foldM)
 import           Control.Monad.Error    (catchError)
+import           Control.Monad.Reader   (ReaderT, ask, local, runReaderT)
+import           Control.Monad.Trans    (lift)
+import           Control.Monad.Writer   (WriterT, runWriterT, tell)
 import qualified CoreFVs                as CoreFVs
 import           CoreSyn
 import           Data.List              (find)
+import           Data.Monoid            (Monoid (..))
 import qualified DataCon                as DataCon
 import qualified MkCore                 as MkCore
 import           Type                   (Type)
@@ -51,13 +54,206 @@ foldPass = fmap removeRec . mapM foldPass'
 
 
 --------------------------------------------------------------------------------
+data ArgInfo
+    = TypeArg
+    | ScrutineeArg
+    | OtherArg
+    deriving (Show)
+
+
+--------------------------------------------------------------------------------
+toFold :: Var -> Expr Var -> RewriteM (Expr Var)
+toFold f body = do
+    let (args, body') = CoreSyn.collectBinders body
+    (x, caseBinder, reTy, alts) <- case body' of
+        Case (Var x) caseBinder reTy alts -> return (x, caseBinder, reTy, alts)
+        _                                 -> fail "No top-level case"
+
+    when (isUnliftedType reTy) $
+        fail "Cannot deal with unlifted fold result types"
+
+    let argInfo a
+            | Var.isTyVar a   = TypeArg
+            | Var.isTcTyVar a = TypeArg
+            | a == x          = ScrutineeArg
+            | otherwise       = OtherArg
+
+        argInfos  = [(a, argInfo a) | a <- args]
+        otherArgs = [a | (a, OtherArg) <- argInfos]
+        altReTy   = Type.mkFunTys (map Var.varType otherArgs) reTy
+
+    let foldRead = FoldRead f (Var.varType x) reTy altReTy argInfos []
+    (alts', rec) <-
+        flip runFold foldRead $ forM alts $ \alt@(ac, bnds, _) -> do
+            expr' <- rewriteAlt x caseBinder alt
+            -- Note how the case binder cannot appear in the result, since it is
+            -- a synonym for `x`.
+            assertWellScoped (caseBinder : x : bnds) expr'
+            return (ac, expr')
+
+    module' <- rewriteModule
+    when (unAnyBool rec) $ case Type.splitTyConApp_maybe (Var.varType x) of
+        Nothing      -> return ()
+        Just (tc, _) -> important $ "WhatMorphismResult: Fold: " ++
+            dump module' ++ "." ++ dump f ++ ", " ++ dump tc
+
+    detect <- isDetectMode
+    if detect
+        then return (Var f) -- Worst. Hack. Ever.
+        else do
+            expr' <- mkFold x altReTy alts'
+            return $ MkCore.mkCoreLams
+                args
+                (MkCore.mkCoreApps expr' (map Var otherArgs))
+
+
+--------------------------------------------------------------------------------
+newtype AnyBool = AnyBool {unAnyBool :: Bool} deriving (Eq, Show)
+
+
+--------------------------------------------------------------------------------
+instance Monoid AnyBool where
+    mempty                          = AnyBool False
+    mappend (AnyBool x) (AnyBool y) = AnyBool (x || y)
+
+
+--------------------------------------------------------------------------------
+data FoldRead = FoldRead
+    { foldVar        :: Var
+    , foldDeTy       :: Type
+    , foldReTy       :: Type
+    , foldAltReTy    :: Type
+    , foldArgInfos   :: [(Var, ArgInfo)]
+    , foldRecBinders :: [(Var, Var)]
+    }
+
+
+--------------------------------------------------------------------------------
+type Fold a = ReaderT FoldRead (WriterT AnyBool RewriteM) a
+
+
+--------------------------------------------------------------------------------
+runFold :: Fold a -> FoldRead -> RewriteM (a, AnyBool)
+runFold f fr = runWriterT (runReaderT f fr)
+
+
+--------------------------------------------------------------------------------
+liftRewriteM :: RewriteM a -> Fold a
+liftRewriteM = lift . lift
+
+
+--------------------------------------------------------------------------------
+rewriteAlt :: Var -> Var -> (AltCon, [Var], Expr Var) -> Fold (Expr Var)
+rewriteAlt x caseBinder alt@(_, bnds, expr) = do
+    deTy     <- foldDeTy <$> ask
+    altReTy  <- foldAltReTy <$> ask
+    argInfos <- foldArgInfos <$> ask
+    lamArgs  <- forM bnds $ \b -> do
+        let rec = Type.eqType (Var.varType b) deTy
+        arg <- if rec
+            then liftRewriteM (liftCoreM $ freshVar "rec" altReTy)
+            else return b
+        return (arg, rec)
+
+    -- Left-hand side of the case alternative. We can replace x and the
+    -- caseBinder by this, this helps us recognize folds in some cases.
+    lhs <- altLhs x alt
+    let env        = [(x, lhs), (caseBinder, lhs)]
+        expr'      = substExpr env expr
+        recBinders = [(b, a) | (b, (a, True)) <- zip bnds lamArgs]
+
+    expr'' <- local
+        (\r -> r {foldRecBinders = recBinders})
+        (rewriteAltBody expr')
+
+    return $ MkCore.mkCoreLams
+        (map fst lamArgs ++ [a | (a, OtherArg) <- argInfos])
+        expr''
+
+
+--------------------------------------------------------------------------------
+rewriteAltBody :: Expr Var -> Fold (Expr Var)
+
+rewriteAltBody e@(Var _) = return e
+
+rewriteAltBody e@(Lit _) = return e
+
+-- TODO: real work here!
+rewriteAltBody expr@(App _ _) = do
+    f          <- foldVar <$> ask
+    argInfos   <- foldArgInfos <$> ask
+    recBinders <- foldRecBinders <$> ask
+
+    let (app, args) = CoreSyn.collectArgs expr
+    case app of
+        (Var v)
+            | v == f    -> do
+                unless (length args == length argInfos) $
+                    fail "Wrong arg length"
+
+                (args', recSubTerm) <- foldM
+                        (\(as, rst) (arg, (_, info)) -> case (arg, info) of
+                            (Var a, ScrutineeArg) ->
+                                case lookup a recBinders of
+                                    Nothing -> fail "Wrong ScrutineeArg"
+                                    Just a' -> return (as, Just a')
+                            (_, ScrutineeArg) -> fail "Weird ScrutineeArg"
+                            (_, TypeArg) -> return (as, rst)
+                            (_, OtherArg) ->
+                                return (as ++ [arg], rst))
+                        ([], Nothing)
+                        (zip args argInfos)
+
+                recSubTerm' <- case recSubTerm of
+                    Just rst -> return rst
+                    _        -> fail "No recSubTerm"
+
+                tell $ AnyBool True  -- We have recursion!
+                return $ MkCore.mkCoreApps (Var recSubTerm') args'
+
+            | otherwise -> do
+                args' <- mapM rewriteAltBody args
+                return $ MkCore.mkCoreApps (Var v) args'
+
+        _ -> do
+            args' <- mapM rewriteAltBody args
+            return $ MkCore.mkCoreApps app args'
+
+rewriteAltBody (Lam x e) = Lam x <$> rewriteAltBody e
+
+rewriteAltBody (Let bs ex) = do
+    bs' <- withBinds bs $ \b e ->
+        rewriteAltBody e >>= \e' -> return (b, e')
+    ex' <- rewriteAltBody ex
+    return (Let bs' ex')
+
+rewriteAltBody (Case e b t alts) = do
+    e'    <- rewriteAltBody e
+    alts' <- forM alts $ \(ac, bs, ex) -> do
+        ex' <- rewriteAltBody ex
+        return (ac, bs, ex')
+    return (Case e' b t alts')
+
+rewriteAltBody (Cast e c) = Cast <$> rewriteAltBody e <*> pure c
+
+rewriteAltBody (Tick t e) = Tick t <$> rewriteAltBody e
+
+rewriteAltBody e@(Type _) = return e
+
+rewriteAltBody e@(Coercion _) = return e
+
+
+--------------------------------------------------------------------------------
+{-
 toFold :: Var -> Expr Var -> RewriteM (Expr Var)
 toFold f body = do
     message $ "Starting with: " ++ dump body
     toFold' f (Var f) id body
+-}
 
 
 --------------------------------------------------------------------------------
+{-
 toFold' :: Var
         -> Expr Var
         -> (Expr Var -> Expr Var)
@@ -67,9 +263,11 @@ toFold' f ef mkF (Lam x body) =
     toFoldOver f (\t -> App ef (Var t)) (\e -> mkF (Lam x e)) x body <|>
     toFold' f (App ef (Var x)) (\e -> mkF (Lam x e)) body
 toFold' _ _  _   _            = fail "No top-level Lam"
+-}
 
 
 --------------------------------------------------------------------------------
+{-
 toFoldOver :: Var
            -> (Var -> Expr Var)
            -> (Expr Var -> Expr Var)
@@ -80,8 +278,6 @@ toFoldOver f ef mkF d (Lam x body) =
     toFoldOver f (\t -> App (ef t) (Var x)) (\e -> mkF (Lam x e)) d body
 toFoldOver f ef mkF d (Case (Var x) caseBinder rTyp alts)
     | x == d                    = do
-        when (isUnliftedType rTyp) $
-            fail "Cannot deal with unlifted fold result types"
 
         alts' <- forM alts $ \alt@(ac, bnds, expr) -> do
             message $ "Rewriting AltCon " ++ dump ac
@@ -112,15 +308,16 @@ toFoldOver f ef mkF d (Case (Var x) caseBinder rTyp alts)
             else mkF <$> mkFold d rTyp (map fst alts')
     | otherwise                 = fail "Wrong argument destructed"
 toFoldOver _ _ _ _ _            = fail "No top-level Case"
+-}
 
 
 --------------------------------------------------------------------------------
-altLhs :: Var -> Alt Var -> RewriteM (Expr Var)
+altLhs :: Var -> Alt Var -> Fold (Expr Var)
 altLhs x (ac, bs, _) = case ac of
     LitAlt l   -> return (Lit l)
     DEFAULT    -> return (Var x)
     DataAlt dc -> do
-        xTyArgs <- liftMaybe "Destructed Var is no TyCon..." $ do
+        xTyArgs <- liftRewriteM $ liftMaybe "Destructed Var is no TyCon..." $ do
             (_, as) <- Type.splitTyConApp_maybe (Var.varType x)
             return as
         return $ MkCore.mkCoreApps
@@ -186,6 +383,7 @@ mkListFold d rTyp alts = do
 
 
 --------------------------------------------------------------------------------
+{-
 rewriteAlt :: (Var -> Expr Var)
            -> Var
            -> [Var]
@@ -202,12 +400,13 @@ rewriteAlt ef d (t : ts) rTyp body = do
     return (expr', rec || (rec' && isRecursive))
   where
     isRecursive = Var.varType t `Type.eqType` Var.varType d
+-}
 
 
 --------------------------------------------------------------------------------
 -- | We don't actually do any scoping, we just have a list of vars which can't
 -- appear anymore.
-assertWellScoped :: [Var] -> Expr Var -> RewriteM ()
+assertWellScoped :: [Var] -> Expr Var -> Fold ()
 assertWellScoped vars body = case find (`VarSet.elemVarSet` varSet) vars of
     Just v -> fail $ "Not well-scoped: " ++ dump v ++ " still appears"
     _      -> return ()
