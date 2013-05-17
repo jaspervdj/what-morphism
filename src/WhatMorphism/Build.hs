@@ -25,7 +25,6 @@ import qualified CoreSyn               as CoreSyn
 import           Data.Maybe            (isJust)
 import           DataCon               (DataCon)
 import qualified DataCon               as DataCon
-import qualified IdInfo                as IdInfo
 import qualified MkCore                as MkCore
 import qualified Outputable            as Outputable
 import           Type                  (Type)
@@ -106,7 +105,7 @@ toBuild f body = do
     -- TODO: This run is not needed! But useful for now... in some way or
     -- another.
     (_, state) <- runStateT (runReaderT (replace [] body')
-        (BuildRead f g lamReTy replacements)) emptyBuildState
+        (BuildRead build f g lamReTy replacements)) emptyBuildState
     dataConTyArgs <- liftMaybe "Build: No DataCon TyArgs!" $
         buildDataConTyArgs state
 
@@ -115,7 +114,7 @@ toBuild f body = do
     lamArgs' <- liftCoreM $ forM consTys (freshVar "cons" . substTy env)
     let replacements' = zip conses lamArgs'
     (body'', _) <- runStateT (runReaderT (replace [] body')
-        (BuildRead f g lamReTy replacements')) emptyBuildState
+        (BuildRead build f g lamReTy replacements')) emptyBuildState
 
     -- Dump some info
     module' <- rewriteModule
@@ -136,7 +135,8 @@ toBuild f body = do
 
 --------------------------------------------------------------------------------
 data BuildRead = BuildRead
-    { buildVar                 :: Var
+    { buildBuild               :: Var
+    , buildVar                 :: Var
     , buildVarReplacement      :: Var
     -- , buildResultTy            :: Type
     , buildReplacementResultTy :: Type  -- Type of 'b'
@@ -219,7 +219,9 @@ replace _ (Coercion c) = return (Coercion c)
 -- to be added in Reader).
 recursionOrReplaceDataCon :: [(Var, Expr Var)] -> Expr Var -> Build (Expr Var)
 recursionOrReplaceDataCon env expr = do
-    recursionVar <- buildVar <$> ask
+    build        <- buildBuild <$> ask
+    recursionVar <- buildVar   <$> ask
+    resultTy     <- buildReplacementResultTy <$> ask
 
     -- In case we replace a constructor, or a (polymorphic) recursive call, we
     -- don't need the type arguments anymore (I think).
@@ -240,12 +242,19 @@ recursionOrReplaceDataCon env expr = do
                 liftRewriteM $ message $ "Recursion found, OK"
                 return $ MkCore.mkCoreApps (Var replacement) $
                     drop numTyArgs args
+            | var .==. build -> do
+                liftRewriteM $ message $ "Nested build, OK"
+                g <- case drop numTyArgs args of
+                        [g] -> return g
+                        _   -> fail "Nested build should have exactly 1 arg (g)"
+                ourArgs <- map snd . buildReplacements <$> ask
+                return $ MkCore.mkCoreApps g (Type resultTy : map Var ourArgs)
             -- Simple variable substitution
             | null args && inEnv var ->
                 let Just expr' = lookup var env
                 in recursionOrReplaceDataCon env expr'
-            | Var.isId var           -> case Var.idDetails var of
-                IdInfo.DataConWorkId dc -> do
+            | Var.isId var           -> case idToDataCon var of
+                Just dc -> do
                     replacement <- replacementForDataCon var dc
                     let ris = recursiveIndices dc
                     liftRewriteM $ message $ "Recursive indices for " ++
@@ -261,6 +270,12 @@ recursionOrReplaceDataCon env expr = do
                         drop numTyArgs args'
                 _                       -> fail' $ "No DataCon Id: " ++ dump var
             | otherwise              -> fail' "Unexpected Var"
+
+        -- Another quick hack
+        (Let (NonRec v b) e) -> do
+            e' <- recursionOrReplaceDataCon ((v, b) : env) e
+            return $ (Let (NonRec v b) e')
+
         _ -> fail' "No App or Var found"
   where
     fail' err = fail $ "WhatMorphism.Build.recursionOrReplaceDataCon: " ++ err
