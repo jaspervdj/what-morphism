@@ -7,7 +7,7 @@ module WhatMorphism.Fold
 
 --------------------------------------------------------------------------------
 import           Control.Applicative    (pure, (<$>), (<*>))
-import           Control.Monad          (forM, mplus, unless, when, foldM)
+import           Control.Monad          (foldM, forM, mplus, unless, when)
 import           Control.Monad.Error    (catchError)
 import           Control.Monad.Reader   (ReaderT, ask, local, runReaderT)
 import           Control.Monad.Trans    (lift)
@@ -87,19 +87,31 @@ toFold f body = do
         flip runFold foldRead $ forM alts $ \alt@(ac, bnds, _) -> do
             expr' <- rewriteAlt x caseBinder alt
             -- Note how the case binder cannot appear in the result, since it is
-            -- a synonym for `x`.
+            -- a synonym for `x`. Also note how non-recursive bindings *will*
+            -- still appear in the `expr'`, but since we have something like:
+            --
+            --     sum (x : xs) = x + sum xs
+            --
+            -- ~~>
+            --
+            --     (\x rec -> x + rec)
+            --
+            -- The `x` will be shadowed by the lambda binder, so it won't appear
+            -- as a free variable!
             assertWellScoped (caseBinder : x : bnds) expr'
             return (ac, expr')
 
+    let isDegenerateFold = not $ unAnyBool rec
     module' <- rewriteModule
-    when (unAnyBool rec) $ case Type.splitTyConApp_maybe (Var.varType x) of
-        Nothing      -> return ()
-        Just (tc, _) -> important $ "WhatMorphismResult: Fold: " ++
-            dump module' ++ "." ++ dump f ++ ", " ++ dump tc
+    when (not isDegenerateFold) $
+        case Type.splitTyConApp_maybe (Var.varType x) of
+            Nothing      -> return ()
+            Just (tc, _) -> important $ "WhatMorphismResult: Fold: " ++
+                dump module' ++ "." ++ dump f ++ ", " ++ dump tc
 
     detect <- isDetectMode
-    if detect
-        then return (Var f) -- Worst. Hack. Ever.
+    if (detect || isDegenerateFold)
+        then fail $ "Not changing (degenerate=" ++ show isDegenerateFold ++ ")"
         else do
             expr' <- mkFold x altReTy alts'
             return $ MkCore.mkCoreLams
@@ -118,6 +130,10 @@ instance Monoid AnyBool where
 
 
 --------------------------------------------------------------------------------
+type FoldWrite = AnyBool
+
+
+--------------------------------------------------------------------------------
 data FoldRead = FoldRead
     { foldVar        :: Var
     , foldDeTy       :: Type
@@ -129,7 +145,7 @@ data FoldRead = FoldRead
 
 
 --------------------------------------------------------------------------------
-type Fold a = ReaderT FoldRead (WriterT AnyBool RewriteM) a
+type Fold a = ReaderT FoldRead (WriterT FoldWrite RewriteM) a
 
 
 --------------------------------------------------------------------------------
