@@ -215,8 +215,9 @@ rewriteAltBody expr@(App _ _) = do
                                     Just a' -> return (as, Just a')
                             (_, ScrutineeArg) -> fail "Weird ScrutineeArg"
                             (_, TypeArg) -> return (as, rst)
-                            (_, OtherArg) ->
-                                return (as ++ [arg], rst))
+                            (_, OtherArg) -> do
+                                arg' <- rewriteAltBody arg
+                                return (as ++ [arg'], rst))
                         ([], Nothing)
                         (zip args argInfos)
 
