@@ -261,74 +261,6 @@ rewriteAltBody e@(Coercion _) = return e
 
 
 --------------------------------------------------------------------------------
-{-
-toFold :: Var -> Expr Var -> RewriteM (Expr Var)
-toFold f body = do
-    message $ "Starting with: " ++ dump body
-    toFold' f (Var f) id body
--}
-
-
---------------------------------------------------------------------------------
-{-
-toFold' :: Var
-        -> Expr Var
-        -> (Expr Var -> Expr Var)
-        -> Expr Var
-        -> RewriteM (Expr Var)
-toFold' f ef mkF (Lam x body) =
-    toFoldOver f (\t -> App ef (Var t)) (\e -> mkF (Lam x e)) x body <|>
-    toFold' f (App ef (Var x)) (\e -> mkF (Lam x e)) body
-toFold' _ _  _   _            = fail "No top-level Lam"
--}
-
-
---------------------------------------------------------------------------------
-{-
-toFoldOver :: Var
-           -> (Var -> Expr Var)
-           -> (Expr Var -> Expr Var)
-           -> Var
-           -> Expr Var
-           -> RewriteM (Expr Var)
-toFoldOver f ef mkF d (Lam x body) =
-    toFoldOver f (\t -> App (ef t) (Var x)) (\e -> mkF (Lam x e)) d body
-toFoldOver f ef mkF d (Case (Var x) caseBinder rTyp alts)
-    | x == d                    = do
-
-        alts' <- forM alts $ \alt@(ac, bnds, expr) -> do
-            message $ "Rewriting AltCon " ++ dump ac
-            message $ "Was: " ++ dump expr
-            -- Left-hand side of the case alternative. We can replace x and the
-            -- caseBinder by this, this helps us recognize folds in some cases.
-            lhs <- altLhs x alt
-            let env    = [(x, lhs), (caseBinder, lhs)]
-                expr' = substExpr env expr
-            (expr'', rec) <- rewriteAlt ef d bnds rTyp expr'
-            message $ "Now: " ++ dump expr''
-            -- Note how the case binder cannot appear in the result, since it is
-            -- a synonym for `x`.
-            assertWellScoped (caseBinder : x : bnds) expr''
-            return ((ac, expr''), rec)
-        -- fold <- mkListFold d rTyp alts'
-
-        module' <- rewriteModule
-        when (or $ map snd alts') $
-            case Type.splitTyConApp_maybe (Var.varType d) of
-                Nothing      -> return ()
-                Just (tc, _) -> important $ "WhatMorphismResult: Fold: " ++
-                    dump module' ++ "." ++ dump f ++ ", " ++ dump tc
-
-        detect <- isDetectMode
-        if detect
-            then return (Var f) -- Worst. Hack. Ever.
-            else mkF <$> mkFold d rTyp (map fst alts')
-    | otherwise                 = fail "Wrong argument destructed"
-toFoldOver _ _ _ _ _            = fail "No top-level Case"
--}
-
-
---------------------------------------------------------------------------------
 altLhs :: Var -> Alt Var -> Fold (Expr Var)
 altLhs x (ac, bs, _) = case ac of
     LitAlt l   -> return (Lit l)
@@ -396,27 +328,6 @@ mkListFold d rTyp alts = do
 
     getAlt dataCon = liftMaybe ("No alt found for " ++ dump dataCon) $
         lookup (DataAlt dataCon) alts
--}
-
-
---------------------------------------------------------------------------------
-{-
-rewriteAlt :: (Var -> Expr Var)
-           -> Var
-           -> [Var]
-           -> Type
-           -> Expr Var
-           -> RewriteM (Expr Var, Bool)  -- ^ Rewriten expr, any recursive
-rewriteAlt _  _ []       _    body = return (body, False)
-rewriteAlt ef d (t : ts) rTyp body = do
-    (expr, rec)   <- rewriteAlt ef d ts rTyp body
-    (expr', rec') <- liftCoreM $ if isRecursive
-        then mkLambda rTyp            (ef t)  expr
-        else mkLambda (Var.varType t) (Var t) expr
-
-    return (expr', rec || (rec' && isRecursive))
-  where
-    isRecursive = Var.varType t `Type.eqType` Var.varType d
 -}
 
 

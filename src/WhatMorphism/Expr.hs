@@ -8,12 +8,10 @@ module WhatMorphism.Expr
     , substExpr
     , substTy
     , toVar
-    , mkLambda
     , freshVar
     , binds
     , withBinds
     , withBindsEverywhere
-    , foldExpr
     , guessFunctionReturnType
     , getDataCons
     , idBaseName
@@ -25,7 +23,6 @@ module WhatMorphism.Expr
 
 --------------------------------------------------------------------------------
 import qualified BasicTypes                 as BasicTypes
-import           Coercion                   (Coercion)
 import           Control.Monad              (forM, liftM)
 import           Control.Monad.State.Strict (State, modify, runState)
 import qualified CoreFVs                    as CoreFVs
@@ -38,7 +35,6 @@ import           Data.Typeable              (cast)
 import           DataCon                    (DataCon)
 import qualified IdInfo                     as IdInfo
 import qualified Id as Id
-import           Literal                    (Literal)
 import qualified Name                       as Name
 import qualified OccName                    as OccName
 import qualified SrcLoc                     as SrcLoc
@@ -165,28 +161,6 @@ toVar _       = Nothing
 
 
 --------------------------------------------------------------------------------
--- | Remove an expression by creating a lambda
---
--- If we float out @x@, this:
---
--- > foo x + x
---
--- Becomes something like:
---
--- > (\tmp -> foo tmp + tmp) x
-mkLambda :: Type -> Expr Var -> Expr Var -> CoreM (Expr Var, Bool)
-mkLambda typ needle haystack = do
-    tmp <- freshVar "wm" typ
-
-    let check n
-            | n .==. needle = Just (Var tmp)
-            | otherwise     = Nothing
-        (haystack', repl)   = replaceExpr check haystack
-
-    return $ (Lam tmp haystack', repl > 0)
-
-
---------------------------------------------------------------------------------
 -- | Generate a fresh variable
 freshVar :: String -> Type -> CoreM Var
 freshVar prefix typ = do
@@ -196,39 +170,6 @@ freshVar prefix typ = do
         -- var  = Var.mkLocalVar IdInfo.VanillaId name typ IdInfo.vanillaIdInfo
         var  = Var.mkCoVar name typ
     return var
-
-
---------------------------------------------------------------------------------
--- | Since we love folds...
--- TODO: Delete?
-foldExpr
-    :: (Id -> a)                                    -- ^ Var
-    -> (Literal -> a)                               -- ^ Lit
-    -> (a -> a -> a)                                -- ^ App
-    -> (b -> a -> a)                                -- ^ Lam
-    -> (b -> a -> a -> a)                           -- ^ Bind NonRec
-    -> ([(b, a)] -> a -> a)                         -- ^ Bind Rec
-    -> (a -> b -> Type -> [(AltCon, [b], a)] -> a)  -- ^ Case
-    -> (a -> Coercion -> a)                         -- ^ Cast
-    -> (Tickish Id -> a -> a)                       -- ^ Tick
-    -> (Type -> a)                                  -- ^ Type
-    -> (Coercion -> a)                              -- ^ Coercion
-    -> Expr b                                       -- ^ Expr to fold over
-    -> a                                            -- ^ Result
-foldExpr var lit app lam bnrec brec cas cast' tick typ coer = go
-  where
-    go (Var x)         = var x
-    go (Lit x)         = lit x
-    go (App f x)       = app (go f) (go x)
-    go (Lam a x)       = lam a (go x)
-    go (Let b e)       = case b of
-        NonRec b' e' -> bnrec b' (go e') (go e)
-        Rec bs       -> brec [(b', go e') | (b', e') <- bs] (go e)
-    go (Case e b t as) = cas (go e) b t [(ac, bs, go e') | (ac, bs, e') <- as]
-    go (Cast e c)      = cast' (go e) c
-    go (Tick t e)      = tick t (go e)
-    go (Type t)        = typ t
-    go (Coercion c)    = coer c
 
 
 --------------------------------------------------------------------------------
