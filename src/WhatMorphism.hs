@@ -56,7 +56,7 @@ installWhatMorphism _args todos = do
                     (runRewritePass foldPass inliner)
 
                 , CoreDoSimplify 1 (SimplMode ["WhatMorphism.Simplifier"]
-                    (Phase 1) True True False False)
+                    (Phase 2) True True False False)
 
                 -- , CoreDoPluginPass "WhatMorphism.Inliner" (inline inliner)
                 , CoreDoPluginPass "WhatMorphism.Fusion"
@@ -65,7 +65,7 @@ installWhatMorphism _args todos = do
 
     return $
         (if whatMorphismScope whatMorphismConfig == WhatMorphismFull
-            then intersperse
+            then insertSmart
             else afterSimplifier)
                 (CoreDoPasses passes) todos
   where
@@ -85,6 +85,19 @@ installWhatMorphism _args todos = do
     inline inliner = bindsOnlyPass (CoreMonad.liftIO . inlinerPass inliner)
 
     detect = whatMorphismMode whatMorphismConfig == WhatMorphismDetect
+
+
+--------------------------------------------------------------------------------
+insertSmart :: CoreToDo -> [CoreToDo] -> [CoreToDo]
+insertSmart wm passes =
+    case break (isPhase 0) passes of
+        (beforePhase0, phase0) ->
+            intersperse wm beforePhase0 ++ [wm] ++ phase0
+  where
+    isPhase n (CoreDoSimplify _ sm) = case sm_phase sm of
+        Phase m -> n == m
+        _       -> False
+    isPhase _ _                     = False
 
 
 --------------------------------------------------------------------------------

@@ -6,7 +6,7 @@ module WhatMorphism.Fusion
 
 --------------------------------------------------------------------------------
 import           Control.Applicative   (pure, (<$>), (<*>))
-import           Control.Monad         (unless)
+import           Control.Monad         (forM, unless)
 import           Control.Monad.Error   (catchError)
 import           CoreSyn               (Bind (..), CoreBind, Expr (..))
 import qualified CoreSyn               as CoreSyn
@@ -25,10 +25,11 @@ import           WhatMorphism.RewriteM
 
 --------------------------------------------------------------------------------
 fusePass :: [CoreBind] -> RewriteM [CoreBind]
-fusePass = mapM $ \b -> withBinds b $ \v expr -> do
-    expr' <- fuse [] expr
+fusePass topLevel = forM topLevel $ \b -> withBinds b $ \v expr -> do
+    expr' <- fuse topLevelEnv expr
     return (v, expr')
   where
+    topLevelEnv = [(v, e) | NonRec v e <- topLevel]
 
 
 --------------------------------------------------------------------------------
