@@ -265,13 +265,16 @@ altLhs :: Var -> Alt Var -> Fold (Expr Var)
 altLhs x (ac, bs, _) = case ac of
     LitAlt l   -> return (Lit l)
     DEFAULT    -> return (Var x)
-    DataAlt dc -> do
-        xTyArgs <- liftRewriteM $ liftMaybe "Destructed Var is no TyCon..." $ do
-            (_, as) <- Type.splitTyConApp_maybe (Var.varType x)
-            return as
-        return $ MkCore.mkCoreApps
-            (Var (DataCon.dataConWrapId dc))
-            (map Type xTyArgs ++ map Var bs)
+    DataAlt dc
+        | DataCon.isVanillaDataCon dc -> do
+            xTyArgs <- liftRewriteM $ liftMaybe "Scrutinee is no TyCon..." $ do
+                (_, as) <- Type.splitTyConApp_maybe (Var.varType x)
+                return as
+            return $ MkCore.mkCoreApps
+                (Var (DataCon.dataConWrapId dc))
+                (map Type xTyArgs ++ map Var bs)
+        -- GADTs, ExistentialQuantification...
+        | otherwise                   -> return (Var x)
 
 
 --------------------------------------------------------------------------------
