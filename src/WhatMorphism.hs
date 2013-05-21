@@ -31,9 +31,9 @@ plugin = defaultPlugin
 -- | CHANGE ME
 whatMorphismConfig :: WhatMorphismConfig
 whatMorphismConfig = WhatMorphismConfig
-    { whatMorphismScope     = WhatMorphismFull
-    , whatMorphismMode      = WhatMorphismTransform
-    , whatMorphismVerbosity = WhatMorphismDebug
+    { whatMorphismScope     = WhatMorphismQuick
+    , whatMorphismMode      = WhatMorphismDetect
+    , whatMorphismVerbosity = WhatMorphismQuiet
     }
 
 

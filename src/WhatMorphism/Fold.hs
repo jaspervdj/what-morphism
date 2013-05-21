@@ -271,7 +271,7 @@ altLhs x (ac, bs, _) = case ac of
                 (_, as) <- Type.splitTyConApp_maybe (Var.varType x)
                 return as
             return $ MkCore.mkCoreApps
-                (Var (DataCon.dataConWrapId dc))
+                (Var (DataCon.dataConWorkId dc))
                 (map Type xTyArgs ++ map Var bs)
         -- GADTs, ExistentialQuantification...
         | otherwise                   -> return (Var x)
