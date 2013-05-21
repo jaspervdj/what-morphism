@@ -38,11 +38,13 @@ foldHaskellList nil cons = foldHaskellList_go
   where
     foldHaskellList_go []       = nil
     foldHaskellList_go (x : xs) = cons x (foldHaskellList_go xs)
+{-# INLINE [0] foldHaskellList #-}
 
 
 --------------------------------------------------------------------------------
 buildHaskellList :: forall a. (forall b. b -> (a -> b -> b) -> b) -> [a]
 buildHaskellList g = g [] (:)
+{-# INLINE [0] buildHaskellList #-}
 
 
 --------------------------------------------------------------------------------

@@ -65,6 +65,9 @@ mkFold foldName typeName typeBndrs cons = do
                     ]
                 ]
             ]
+
+        , inlineFromPhase foldName' 0
+        -- , PragmaD (InlineP foldName' NoInline FunLike AllPhases)
         ]
   where
     foldName'     = mkName foldName
@@ -111,6 +114,9 @@ mkBuild buildName typeName typeBndrs cons = do
                     [ConE (conName con) | con <- cons]))
                 []
             ]
+
+        , inlineFromPhase buildName' 0
+        -- , PragmaD (InlineP buildName' NoInline FunLike AllPhases)
         ]
   where
     buildName'    = mkName buildName
@@ -156,3 +162,8 @@ conTypes (InfixC t1 _ t2) = map snd [t1, t2]
 conTypes (ForallC _ _ _)  = error $
     "WhatMorphism.TemplateHaskell.conTypes: " ++
     "cannot yet define folds for forall'd types"
+
+
+--------------------------------------------------------------------------------
+inlineFromPhase :: Name -> Int -> Dec
+inlineFromPhase name n = PragmaD (InlineP name Inline FunLike (FromPhase n))
