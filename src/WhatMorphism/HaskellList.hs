@@ -48,6 +48,12 @@ buildHaskellList g = g [] (:)
 
 
 --------------------------------------------------------------------------------
+{-# RULES "foldHaskellList/buildHaskellList-fusion"
+    forall c n (g :: forall b. b -> (a -> b -> b) -> b).
+    foldHaskellList n c (buildHaskellList g) = g n c #-}
+
+
+--------------------------------------------------------------------------------
 haskellListRegister :: UniqFM RegisterFoldBuild
 haskellListRegister = UniqFM.unitUFM TysWiredIn.listTyCon
     (RegisterFoldBuild "foldHaskellList" "buildHaskellList")

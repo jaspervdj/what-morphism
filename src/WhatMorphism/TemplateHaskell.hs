@@ -1,13 +1,25 @@
 --------------------------------------------------------------------------------
 module WhatMorphism.TemplateHaskell
-    ( deriveFold
+    ( deriveFoldBuildFusion
+    , deriveFold
     , deriveBuild
+    , deriveFusion
     ) where
 
 
 --------------------------------------------------------------------------------
-import           Control.Monad       (forM)
+import           Control.Monad       (forM, mapM)
+import           Data.Char           (toLower)
 import           Language.Haskell.TH
+
+
+--------------------------------------------------------------------------------
+deriveFoldBuildFusion :: Name -> String -> String -> Q [Dec]
+deriveFoldBuildFusion typeName foldName buildName = do
+    fold   <- deriveFold typeName foldName
+    build  <- deriveBuild typeName buildName
+    fusion <- deriveFusion typeName foldName buildName
+    return $ concat [fold, build, fusion]
 
 
 --------------------------------------------------------------------------------
@@ -90,21 +102,12 @@ deriveBuild typeName buildName = do
 --------------------------------------------------------------------------------
 mkBuild :: String -> Name -> [TyVarBndr] -> [Con] -> Q [Dec]
 mkBuild buildName typeName typeBndrs cons = do
-    b <- newName "b"  -- Internal return type
-    g <- newName "g"  -- Function given by the user
+    b   <- newName "b"  -- Internal return type
+    g   <- newName "g"  -- Function given by the user
+    gTy <- mkGTy typeName typeBndrs cons
     return
         [ SigD buildName' $ ForallT (typeBndrs) [] $
-            mkFunTy
-                [ForallT [PlainTV b] []
-                    (mkFunTy
-                        [mkFunTy
-                            [ if isRecursive t then (VarT b) else t
-                            | t <- conTypes con
-                            ]
-                            (VarT b)
-                        | con <- cons]
-                        (VarT b))]
-                typ
+            mkFunTy [gTy] typ
 
         , FunD buildName'
             [ Clause
@@ -120,6 +123,57 @@ mkBuild buildName typeName typeBndrs cons = do
         ]
   where
     buildName'    = mkName buildName
+    typ           = mkAppTy typeName typeBndrs
+    isRecursive t = typ == t
+
+
+--------------------------------------------------------------------------------
+deriveFusion :: Name -> String -> String -> Q [Dec]
+deriveFusion typeName foldName buildName = do
+    info <- reify typeName
+    case info of
+        TyConI (DataD _ctx name bndrs cs _derives) ->
+            mkFusion foldName buildName name bndrs cs
+        _                                          -> fail $
+            "WhatMorphism.TemplateHaskell.deriveBuild: " ++
+            "can only derive simple data declarations"
+
+
+--------------------------------------------------------------------------------
+mkFusion :: String -> String -> Name -> [TyVarBndr] -> [Con] -> Q [Dec]
+mkFusion foldName buildName typeName typeBndrs cons = do
+    cvars <- mapM (newName . map toLower . nameBase . conName) cons
+    g     <- newName "g"
+    gTy   <- mkGTy typeName typeBndrs cons
+    return
+        [ PragmaD $
+            RuleP
+                (foldName ++ "/" ++ buildName ++ "-fusion")
+                (map RuleVar cvars ++ [TypedRuleVar g gTy])
+                (mkAppE (VarE foldName')
+                    (map VarE cvars ++ [AppE (VarE buildName') (VarE g)]))
+                (mkAppE (VarE g) (map VarE cvars))
+                AllPhases
+        ]
+  where
+    foldName'  = mkName foldName
+    buildName' = mkName buildName
+
+
+--------------------------------------------------------------------------------
+mkGTy :: Name -> [TyVarBndr] -> [Con] -> Q Type
+mkGTy typeName typeBndrs cons = do
+    b <- newName "b"
+    return $ ForallT [PlainTV b] [] $ mkFunTy
+        [ mkFunTy
+            [ if isRecursive t then (VarT b) else t
+            | t <- conTypes con
+            ]
+            (VarT b)
+        | con <- cons
+        ]
+        (VarT b)
+  where
     typ           = mkAppTy typeName typeBndrs
     isRecursive t = typ == t
 
