@@ -16,6 +16,8 @@ import qualified CoreFVs                as CoreFVs
 import           CoreSyn
 import           Data.List              (find)
 import           Data.Monoid            (Monoid (..))
+import           Data.Set               (Set)
+import qualified Data.Set               as S
 import qualified DataCon                as DataCon
 import qualified MkCore                 as MkCore
 import           Type                   (Type)
@@ -57,7 +59,8 @@ foldPass = fmap removeRec . mapM foldPass'
 data ArgInfo
     = TypeArg
     | ScrutineeArg
-    | OtherArg
+    | StaticArg
+    | ChangingArg
     deriving (Show)
 
 
@@ -72,15 +75,18 @@ toFold f body = do
     when (isUnliftedType reTy) $
         fail "Cannot deal with unlifted fold result types"
 
-    let argInfo a
-            | Var.isTyVar a   = TypeArg
-            | Var.isTcTyVar a = TypeArg
-            | a == x          = ScrutineeArg
-            | otherwise       = OtherArg
+    let changingArgsSet = findChangingArgs f args $ subExprs body'
 
-        argInfos  = [(a, argInfo a) | a <- args]
-        otherArgs = [a | (a, OtherArg) <- argInfos]
-        altReTy   = Type.mkFunTys (map Var.varType otherArgs) reTy
+        argInfo a
+            | Var.isTyVar a                = TypeArg
+            | Var.isTcTyVar a              = TypeArg
+            | a == x                       = ScrutineeArg
+            | a `S.member` changingArgsSet = ChangingArg
+            | otherwise                    = StaticArg
+
+        argInfos     = [(a, argInfo a) | a <- args]
+        changingArgs = [a | (a, ChangingArg) <- argInfos]
+        altReTy      = Type.mkFunTys (map Var.varType changingArgs) reTy
 
     let foldRead = FoldRead f (Var.varType x) reTy altReTy argInfos []
     (alts', rec) <-
@@ -116,7 +122,7 @@ toFold f body = do
             expr' <- mkFold x altReTy alts'
             return $ MkCore.mkCoreLams
                 args
-                (MkCore.mkCoreApps expr' (map Var otherArgs))
+                (MkCore.mkCoreApps expr' (map Var changingArgs))
 
 
 --------------------------------------------------------------------------------
@@ -183,7 +189,7 @@ rewriteAlt x caseBinder alt@(_, bnds, expr) = do
         (rewriteAltBody expr')
 
     return $ MkCore.mkCoreLams
-        (map fst lamArgs ++ [a | (a, OtherArg) <- argInfos])
+        (map fst lamArgs ++ [a | (a, ChangingArg) <- argInfos])
         expr''
 
 
@@ -215,7 +221,8 @@ rewriteAltBody expr@(App _ _) = do
                                     Just a' -> return (as, Just a')
                             (_, ScrutineeArg) -> fail "Weird ScrutineeArg"
                             (_, TypeArg) -> return (as, rst)
-                            (_, OtherArg) -> do
+                            (_, StaticArg) -> return (as, rst)
+                            (_, ChangingArg) -> do
                                 arg' <- rewriteAltBody arg
                                 return (as ++ [arg'], rst))
                         ([], Nothing)
@@ -343,3 +350,17 @@ assertWellScoped vars body = case find (`VarSet.elemVarSet` varSet) vars of
     _      -> return ()
   where
     varSet = CoreFVs.exprFreeVars body
+
+
+--------------------------------------------------------------------------------
+findChangingArgs :: Var -> [Var] -> [Expr Var] -> Set Var
+findChangingArgs f args exprs = S.fromList
+    [ arg1
+    | expr            <- exprs
+    , (Var f', args') <- return $ CoreSyn.collectArgs expr
+    , f == f'
+    , (arg1, arg2) <- zip args args'
+    , case arg2 of
+        Var v -> v /= arg1
+        _     -> True
+    ]
