@@ -33,7 +33,7 @@ whatMorphismConfig :: WhatMorphismConfig
 whatMorphismConfig = WhatMorphismConfig
     { whatMorphismScope     = WhatMorphismQuick
     , whatMorphismMode      = WhatMorphismDetect
-    , whatMorphismVerbosity = WhatMorphismQuiet
+    , whatMorphismVerbosity = WhatMorphismDebug
     }
 
 
@@ -45,7 +45,9 @@ installWhatMorphism _args todos = do
 
     let passes
             | detect     =
-                [ CoreDoPluginPass "WhatMorphism.Fold"
+                [ CoreDoPluginPass "WhatMorphism.Build"
+                    (runRewritePass buildPass inliner)
+                , CoreDoPluginPass "WhatMorphism.Fold"
                     (runRewritePass foldPass inliner)
                 ]
 

@@ -80,3 +80,10 @@ instance SynEq a => SynEq [a] where
     []       .==. []       = True
     (x : xs) .==. (y : ys) = x .==. y && xs .==. ys
     _        .==. _        = False
+
+
+--------------------------------------------------------------------------------
+instance SynEq a => SynEq (Maybe a) where
+    Nothing .==. Nothing = True
+    Just x  .==. Just y  = x .==. y
+    _       .==. _       = False

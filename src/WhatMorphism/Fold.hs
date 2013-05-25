@@ -11,7 +11,7 @@ import           Control.Monad          (foldM, forM, mplus, unless, when)
 import           Control.Monad.Error    (catchError)
 import           Control.Monad.Reader   (ReaderT, ask, local, runReaderT)
 import           Control.Monad.Trans    (lift)
-import           Control.Monad.Writer   (WriterT, runWriterT, tell)
+import           Control.Monad.Writer   (WriterT, listen, runWriterT, tell)
 import qualified CoreFVs                as CoreFVs
 import           CoreSyn
 import           Data.List              (find)
@@ -28,6 +28,7 @@ import qualified VarSet                 as VarSet
 
 
 --------------------------------------------------------------------------------
+import           WhatMorphism.AnyBool
 import           WhatMorphism.Dump
 import           WhatMorphism.Expr
 import           WhatMorphism.RemoveRec
@@ -65,6 +66,13 @@ data ArgInfo
 
 
 --------------------------------------------------------------------------------
+data Feature
+    = ChangingArgs
+    | NestedRec
+    deriving (Show)
+
+
+--------------------------------------------------------------------------------
 toFold :: Var -> Expr Var -> RewriteM (Expr Var)
 toFold f body = do
     let (args, body') = CoreSyn.collectBinders body
@@ -89,7 +97,7 @@ toFold f body = do
         altReTy      = Type.mkFunTys (map Var.varType changingArgs) reTy
 
     let foldRead = FoldRead f (Var.varType x) reTy altReTy argInfos []
-    (alts', rec) <-
+    (alts', write) <-
         flip runFold foldRead $ forM alts $ \alt@(ac, bnds, _) -> do
             expr' <- rewriteAlt x caseBinder alt
             -- Note how the case binder cannot appear in the result, since it is
@@ -107,13 +115,17 @@ toFold f body = do
             assertWellScoped (caseBinder : x : bnds) expr'
             return (ac, expr')
 
-    let isDegenerateFold = not $ unAnyBool rec
+    let isDegenerateFold = not $ unAnyBool $ foldRec write
+        features         =
+            [ChangingArgs | not (null changingArgs)] ++
+            [NestedRec    | unAnyBool (foldNested write)]
     module' <- rewriteModule
     when (not isDegenerateFold) $
         case Type.splitTyConApp_maybe (Var.varType x) of
             Nothing      -> return ()
             Just (tc, _) -> important $ "WhatMorphismResult: Fold: " ++
-                dump module' ++ "." ++ dump f ++ ", " ++ dump tc
+                dump module' ++ "." ++ dump f ++ " " ++ dump tc ++ " " ++
+                show features
 
     detect <- isDetectMode
     if (detect || isDegenerateFold)
@@ -126,17 +138,17 @@ toFold f body = do
 
 
 --------------------------------------------------------------------------------
-newtype AnyBool = AnyBool {unAnyBool :: Bool} deriving (Eq, Show)
+data FoldWrite = FoldWrite
+    { foldRec    :: AnyBool
+    , foldNested :: AnyBool
+    } deriving (Show, Eq)
 
 
 --------------------------------------------------------------------------------
-instance Monoid AnyBool where
-    mempty                          = AnyBool False
-    mappend (AnyBool x) (AnyBool y) = AnyBool (x || y)
-
-
---------------------------------------------------------------------------------
-type FoldWrite = AnyBool
+instance Monoid FoldWrite where
+    mempty                                    = FoldWrite mempty mempty
+    FoldWrite r1 n1 `mappend` FoldWrite r2 n2 =
+        FoldWrite (r1 `mappend` r2) (n1 `mappend` n2)
 
 
 --------------------------------------------------------------------------------
@@ -155,7 +167,7 @@ type Fold a = ReaderT FoldRead (WriterT FoldWrite RewriteM) a
 
 
 --------------------------------------------------------------------------------
-runFold :: Fold a -> FoldRead -> RewriteM (a, AnyBool)
+runFold :: Fold a -> FoldRead -> RewriteM (a, FoldWrite)
 runFold f fr = runWriterT (runReaderT f fr)
 
 
@@ -223,7 +235,11 @@ rewriteAltBody expr@(App _ _) = do
                             (_, TypeArg) -> return (as, rst)
                             (_, StaticArg) -> return (as, rst)
                             (_, ChangingArg) -> do
-                                arg' <- rewriteAltBody arg
+                                -- Here we deal with nested recursion. This is
+                                -- we listen to see if there is any recursion,
+                                -- and, well, report nested recursion as well.
+                                (arg', write) <- listen $ rewriteAltBody arg
+                                tell mempty {foldNested = foldRec write}
                                 return (as ++ [arg'], rst))
                         ([], Nothing)
                         (zip args argInfos)
@@ -232,7 +248,7 @@ rewriteAltBody expr@(App _ _) = do
                     Just rst -> return rst
                     _        -> fail "No recSubTerm"
 
-                tell $ AnyBool True  -- We have recursion!
+                tell mempty {foldRec = AnyBool True}  -- We have recursion!
                 return $ MkCore.mkCoreApps (Var recSubTerm') args'
 
             | otherwise -> do

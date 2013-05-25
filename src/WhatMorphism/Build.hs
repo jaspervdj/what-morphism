@@ -15,14 +15,17 @@ module WhatMorphism.Build
 
 --------------------------------------------------------------------------------
 import           Control.Applicative   (pure, (<$>), (<*>))
-import           Control.Monad         (forM)
+import           Control.Monad         (forM, unless, when)
 import           Control.Monad.Error   (catchError)
-import           Control.Monad.Reader  (ReaderT, ask, runReaderT)
-import           Control.Monad.State   (StateT, modify, runStateT)
+import           Control.Monad.Reader  (ask)
+import           Control.Monad.RWS     (RWST, runRWST)
+import           Control.Monad.State   (modify)
 import           Control.Monad.Trans   (lift)
+import           Control.Monad.Writer  (tell)
 import           CoreSyn               (Bind (..), CoreBind, Expr (..))
 import qualified CoreSyn               as CoreSyn
 import           Data.Maybe            (isJust)
+import           Data.Monoid           (Monoid (..))
 import           DataCon               (DataCon)
 import qualified DataCon               as DataCon
 import qualified MkCore                as MkCore
@@ -34,6 +37,7 @@ import qualified Var                   as Var
 
 
 --------------------------------------------------------------------------------
+import           WhatMorphism.AnyBool
 import           WhatMorphism.Dump
 import           WhatMorphism.Expr
 import           WhatMorphism.RewriteM
@@ -60,17 +64,47 @@ buildPass = mapM buildPass'
 
 
 --------------------------------------------------------------------------------
+data Feature = RecBuild | NestedBuild deriving (Show)
+
+
+--------------------------------------------------------------------------------
 toBuild :: Var -> Expr Var -> RewriteM (Expr Var)
 toBuild f body = do
     -- We need some info on our type, e.g. 'List'. We find this type by guessing
     -- the return type of our function (real professionalism here).
     let fTy = Var.varType f
         rTy = guessFunctionReturnType fTy
+        (fTyBinders, fValBinders, body') = CoreSyn.collectTyAndValBinders body
     (rTyCon, _rTyArgs) <- liftMaybe "Build has no TyCon" $
         Type.splitTyConApp_maybe rTy
     liftCoreM $ Outputable.pprTrace "rTy" (Type.pprType rTy) $ return ()
     -- liftCoreM $ Outputable.pprTrace "rTy" (Outputable.ppr rTy) $ return ()
     conses <- liftEither $ getDataCons rTy
+
+    -- If it's not a recursive type, e.g. a tuple, a Maybe... there's not much
+    -- to do here
+    unless (or $ conses >>= recursiveIndices) $
+        fail $ "Build: Not a recursive type " ++ dump rTyCon
+
+    -- TODO: This run is not needed! But useful for now... in some way or
+    -- another.
+    maybeBuild <- catchError (Just <$> registeredBuild rTy)
+        (\_ -> return Nothing)
+    (_, state, write) <- runRWST (replace [] body')
+        (BuildRead maybeBuild f f rTy []) emptyBuildState
+    dataConTyArgs <- liftMaybe "Build: No DataCon TyArgs!" $
+        buildDataConTyArgs state
+
+    -- At this point we can do our reporting.
+    module' <- rewriteModule
+    let features =
+            [RecBuild    | unAnyBool (buildRec write)] ++
+            [NestedBuild | unAnyBool (buildNested write)]
+    important $ "WhatMorphismResult: Build: " ++
+        dump module' ++ "." ++ dump f ++ " " ++ dump rTyCon ++ " " ++
+        show features
+    detect <- isDetectMode
+    when detect $ fail "Not changing build"
 
     -- Get the build function, if available
     build <- registeredBuild rTy
@@ -91,7 +125,6 @@ toBuild f body = do
         -- gTyArgs = fst $ Type.splitFunTys $ snd $ Type.splitForAllTys fTy
         -- gTy     = Type.mkFunTys gTyArgs lamReTy
     g <- liftCoreM $ freshVar "g" gTy
-    let (fTyBinders, fValBinders, body') = CoreSyn.collectTyAndValBinders body
     newArgs <- liftCoreM $
         forM fValBinders $ \arg -> freshVar "fArg" (Var.varType arg)
 
@@ -99,35 +132,22 @@ toBuild f body = do
     -- different constructors of the datatype. This is EXTREMELY IMPORTANT.
     -- However, we BLATANTLY DISREGARD checking this. #yolo
     let (consTys, _) = Type.splitFunTys lamTy
-    lamArgs <- liftCoreM $ forM consTys (freshVar "dummy")
-    let replacements = zip conses lamArgs
-
-    -- TODO: This run is not needed! But useful for now... in some way or
-    -- another.
-    (_, state) <- runStateT (runReaderT (replace [] body')
-        (BuildRead build f g lamReTy replacements)) emptyBuildState
-    dataConTyArgs <- liftMaybe "Build: No DataCon TyArgs!" $
-        buildDataConTyArgs state
+    let env = zip consForAllTys dataConTyArgs
+    lamArgs <- liftCoreM $ forM consTys (freshVar "cons" . substTy env)
+    let replacements' = zip conses lamArgs
 
     -- Second run go go go. More precise types are now available.
-    let env = zip consForAllTys dataConTyArgs
-    lamArgs' <- liftCoreM $ forM consTys (freshVar "cons" . substTy env)
-    let replacements' = zip conses lamArgs'
-    (body'', _) <- runStateT (runReaderT (replace [] body')
-        (BuildRead build f g lamReTy replacements')) emptyBuildState
+    (body'', _, _) <- runRWST (replace [] body')
+        (BuildRead (Just build) f g lamReTy replacements') emptyBuildState
 
-    -- Dump some info
-    module' <- rewriteModule
-    important $ "WhatMorphismResult: Build: " ++
-        dump module' ++ "." ++ dump f ++ ", " ++ dump rTyCon
-
+    important $ "WhatMorphismResult: Build using: " ++ dump build
     return $
         MkCore.mkCoreLams (fTyBinders ++ newArgs)
             (App
                 (MkCore.mkCoreApps
                     (Var build)
                     (map Type dataConTyArgs))
-                (MkCore.mkCoreLams (lamReTyVar : lamArgs')
+                (MkCore.mkCoreLams (lamReTyVar : lamArgs)
                     (Let
                         (Rec [(g, MkCore.mkCoreLams fValBinders body'')])
                         (MkCore.mkCoreApps (Var g) (map Var newArgs)))))
@@ -135,13 +155,27 @@ toBuild f body = do
 
 --------------------------------------------------------------------------------
 data BuildRead = BuildRead
-    { buildBuild               :: Var
+    { buildBuild               :: Maybe Var  -- Can be unknown (in detect mode)
     , buildVar                 :: Var
     , buildVarReplacement      :: Var
     -- , buildResultTy            :: Type
     , buildReplacementResultTy :: Type  -- Type of 'b'
     , buildReplacements        :: [(DataCon, Var)]
     }
+
+
+--------------------------------------------------------------------------------
+data BuildWrite = BuildWrite
+    { buildRec    :: AnyBool
+    , buildNested :: AnyBool
+    }
+
+
+--------------------------------------------------------------------------------
+instance Monoid BuildWrite where
+    mempty                                      = BuildWrite mempty mempty
+    BuildWrite r1 n1 `mappend` BuildWrite r2 n2 =
+        BuildWrite (mappend r1 r2) (mappend n1 n2)
 
 
 --------------------------------------------------------------------------------
@@ -156,7 +190,7 @@ emptyBuildState = BuildState Nothing
 
 
 --------------------------------------------------------------------------------
-type Build a = ReaderT BuildRead (StateT BuildState RewriteM) a
+type Build a = RWST BuildRead BuildWrite BuildState RewriteM a
 
 
 --------------------------------------------------------------------------------
@@ -175,7 +209,7 @@ replacementForDataCon original dataCon = do
 
 --------------------------------------------------------------------------------
 liftRewriteM :: RewriteM a -> Build a
-liftRewriteM = lift . lift
+liftRewriteM = lift
 
 
 --------------------------------------------------------------------------------
@@ -240,9 +274,11 @@ recursionOrReplaceDataCon env expr = do
             | var .==. recursionVar  -> do
                 replacement <- buildVarReplacement <$> ask
                 liftRewriteM $ message $ "Recursion found, OK"
+                tell mempty {buildRec = AnyBool True}
                 return $ MkCore.mkCoreApps (Var replacement) $
                     drop numTyArgs args
-            | var .==. build -> do
+            | Just var .==. build -> do
+                tell mempty {buildNested = AnyBool True}
                 liftRewriteM $ message $ "Nested build, OK"
                 g <- case drop numTyArgs args of
                         [g] -> return g
