@@ -76,7 +76,8 @@ fuseApp env expr@(App _ _) = case CoreSyn.collectArgs expr of
         let foldTy                   = Var.varType fold
             (foldForAllTys, foldTy') = Type.splitForAllTys foldTy
             (foldArgTys, _foldReTy)  = Type.splitFunTys foldTy'
-            foldConcreteReTy         = last $ take (length foldForAllTys) fArgs
+        foldConcreteReTy <- liftMaybe "No last arg for fold" $
+            lastMaybe $ take (length foldForAllTys) fArgs
         unless (length foldForAllTys + length foldArgTys == length fArgs) $
             fail "Incorrect arity..."
         let buildExpr = inEnv $ last fArgs
@@ -103,3 +104,9 @@ fuseApp env expr@(App _ _) = case CoreSyn.collectArgs expr of
     inEnv x       = x
 
 fuseApp _ _ = fail "No App"
+
+
+--------------------------------------------------------------------------------
+lastMaybe :: [a] -> Maybe a
+lastMaybe [] = Nothing
+lastMaybe xs = Just (last xs)
